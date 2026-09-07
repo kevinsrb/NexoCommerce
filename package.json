@@ -1,0 +1,29 @@
+{
+  "name": "nexo-commerce",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.1.2",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "auth:prisma:generate": "pnpm --filter @nexo/auth-service prisma:generate",
+    "auth:prisma:migrate": "pnpm --filter @nexo/auth-service prisma:migrate",
+    "catalog:prisma:generate": "pnpm --filter @nexo/catalog-service prisma:generate",
+    "catalog:prisma:migrate": "pnpm --filter @nexo/catalog-service prisma:migrate"
+  },
+  "devDependencies": {
+    "@types/jest": "29.5.14",
+    "@types/node": "22.13.1",
+    "eslint": "9.20.1",
+    "jest": "29.7.0",
+    "prettier": "3.5.1",
+    "ts-jest": "29.2.5",
+    "turbo": "2.4.2",
+    "typescript": "5.7.3"
+  }
+}

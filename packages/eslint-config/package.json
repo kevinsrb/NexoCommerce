@@ -1,0 +1,8 @@
+{
+  "name": "@nexo/eslint-config",
+  "version": "0.1.0",
+  "private": true,
+  "exports": { ".": "./base.js" },
+  "peerDependencies": { "eslint": "^9.0.0" },
+  "dependencies": { "typescript-eslint": "8.24.0" }
+}
