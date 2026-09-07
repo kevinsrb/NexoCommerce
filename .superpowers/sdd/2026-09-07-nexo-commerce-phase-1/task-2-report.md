@@ -113,3 +113,66 @@ Results:
   boundary module is the only future-routing seam.
 - The malformed-payload test validates raw JSON parser failures only; DTO validation will be
   covered by the services that later own mutation endpoints.
+
+---
+
+## Fix round 1 — HTTP middleware order, completion logging, and prefixing
+
+### Changes
+
+- Request-ID middleware now runs before completion logging, Helmet, and CORS. This guarantees
+  that CORS's automatic preflight response receives an `x-request-id` header.
+- Replaced route-scoped interceptor logging with Express response-completion logging. The
+  middleware subscribes to `response.finish`, so it records the final status and duration for
+  CORS preflights, parser failures, unmatched routes, and ordinary Nest controller responses.
+  Each Pino entry includes the logger base `service`, child `requestId`, `method`, `path`, final
+  `statusCode`, and numeric `duration` in milliseconds.
+- Added `app.setGlobalPrefix('api')`, changed the health controller to the prefix-relative
+  `health` path, and changed Swagger setup to `docs`; the resulting public paths remain
+  `/api/health` and `/api/docs`.
+
+### TDD evidence
+
+The new behavior was tested at the real HTTP boundary before changing production code.
+
+```powershell
+pnpm --filter @nexo/api-gateway test
+```
+
+RED result with the prior CORS-before-request-ID ordering:
+
+```text
+API gateway HTTP boundary › adds a request ID to CORS preflight responses
+Matcher error: received value must be a string
+Received has value: undefined
+```
+
+The regression test sends an actual CORS `OPTIONS /api/health` request with `Origin` and
+`Access-Control-Request-Method`, receives the CORS-generated `204`, and asserts a UUID-valued
+`x-request-id` response header. Removing or moving the request-ID middleware after CORS makes
+this test fail.
+
+GREEN result after the ordering fix:
+
+```text
+PASS test/app.e2e-spec.ts
+Tests: 3 passed, 3 total
+```
+
+The same real test run emitted completion records with final `200`, `204`, and malformed-payload
+`400` statuses, each with a numeric `duration`; no mock-only logger assertion was introduced.
+
+### Fix-round verification
+
+All checks passed after formatting:
+
+```powershell
+pnpm --filter @nexo/api-gateway build
+pnpm --filter @nexo/api-gateway lint
+pnpm --filter @nexo/api-gateway test
+pnpm --filter @nexo/api-gateway typecheck
+git diff --check
+```
+
+Results: build, lint, and typecheck exited 0; Jest passed 1 suite / 3 tests; `git diff --check`
+reported no whitespace errors.

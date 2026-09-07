@@ -29,6 +29,16 @@ describe('API gateway HTTP boundary', () => {
     expect(response.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/i);
   });
 
+  it('adds a request ID to CORS preflight responses', async () => {
+    const response = await request(app.getHttpServer())
+      .options('/api/health')
+      .set('origin', 'https://storefront.example')
+      .set('access-control-request-method', 'GET')
+      .expect(204);
+
+    expect(response.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
   it('formats malformed JSON as a public API error', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/health')

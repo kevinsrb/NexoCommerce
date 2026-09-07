@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { type HealthResponse } from '@nexo/contracts';
 
-@Controller('api/health')
+@Controller('health')
 export class HealthController {
   @Get()
   getHealth(): HealthResponse {

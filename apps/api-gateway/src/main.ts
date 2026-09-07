@@ -10,15 +10,17 @@ import helmet from 'helmet';
 
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/http/http-exception.filter';
-import { RequestLoggingInterceptor } from './common/http/request-logging.interceptor';
+import { requestCompletionLoggingMiddleware } from './common/http/request-completion-logging.middleware';
 import { requestIdMiddleware } from './common/http/request-id.middleware';
 
 const logger = createLogger('api-gateway');
 
 export const configureHttpApp = (app: NestExpressApplication): void => {
+  app.use(requestIdMiddleware);
+  app.use(requestCompletionLoggingMiddleware(logger));
   app.use(helmet());
   app.enableCors();
-  app.use(requestIdMiddleware);
+  app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -26,7 +28,6 @@ export const configureHttpApp = (app: NestExpressApplication): void => {
       forbidNonWhitelisted: true,
     }),
   );
-  app.useGlobalInterceptors(new RequestLoggingInterceptor(logger));
   app.useGlobalFilters(new HttpExceptionFilter());
 };
 
@@ -37,7 +38,7 @@ export const configureSwagger = (app: NestExpressApplication): void => {
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
 
-  SwaggerModule.setup('api/docs', app, document);
+  SwaggerModule.setup('docs', app, document);
 };
 
 export const bootstrap = async (): Promise<void> => {
