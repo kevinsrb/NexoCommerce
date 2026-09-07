@@ -1,7 +1,10 @@
+CREATE TYPE "Role" AS ENUM ('CUSTOMER', 'ADMIN');
 CREATE TABLE "User" (
   "id" UUID NOT NULL,
   "email" TEXT NOT NULL,
-  "name" TEXT NOT NULL,
+  "firstName" TEXT NOT NULL,
+  "lastName" TEXT NOT NULL,
+  "role" "Role" NOT NULL DEFAULT 'CUSTOMER',
   "passwordHash" TEXT NOT NULL,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -14,7 +17,6 @@ CREATE TABLE "RefreshToken" (
   "expiresAt" TIMESTAMP(3) NOT NULL,
   "revokedAt" TIMESTAMP(3),
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updatedAt" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "RefreshToken_pkey" PRIMARY KEY ("id")
 );
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");

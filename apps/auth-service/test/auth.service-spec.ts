@@ -17,7 +17,9 @@ describe('AuthService security', () => {
   const user = {
     id: '550e8400-e29b-41d4-a716-446655440000',
     email: 'ada@example.com',
-    name: 'Ada',
+    firstName: 'Ada',
+    lastName: 'Lovelace',
+    role: 'CUSTOMER',
     passwordHash: '',
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -51,16 +53,20 @@ describe('AuthService security', () => {
   it('registers with an Argon2 password hash and returns only public user fields', async () => {
     const result = await service.register({
       email: 'Ada@Example.com',
-      name: 'Ada',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
       password: 'correct horse battery staple',
     });
     const stored = prisma.user.create.mock.calls[0]?.[0].data;
     expect(stored.email).toBe('ada@example.com');
+    expect(stored.role).toBe('CUSTOMER');
     expect(await argon2.verify(stored.passwordHash, 'correct horse battery staple')).toBe(true);
     expect(result.user).toEqual({
       id: user.id,
       email: user.email,
-      name: 'Ada',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'CUSTOMER',
       createdAt: user.createdAt,
     });
     const claims = jwt.verify(result.accessToken, { secret: environment.JWT_ACCESS_SECRET });
@@ -76,7 +82,8 @@ describe('AuthService security', () => {
     await expect(
       service.register({
         email: user.email,
-        name: 'Ada',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
         password: 'correct horse battery staple',
       }),
     ).rejects.toBeInstanceOf(ConflictException);

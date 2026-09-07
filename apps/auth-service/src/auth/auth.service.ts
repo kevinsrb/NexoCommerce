@@ -10,7 +10,9 @@ import { type LoginDto, type RefreshDto, type RegisterDto } from './auth.dto';
 export const publicUser = (user: User) => ({
   id: user.id,
   email: user.email,
-  name: user.name,
+  firstName: user.firstName,
+  lastName: user.lastName,
+  role: user.role,
   createdAt: user.createdAt,
 });
 
@@ -30,7 +32,13 @@ export class AuthService {
     let user: User;
     try {
       user = await this.prisma.user.create({
-        data: { email, name: input.name.trim(), passwordHash },
+        data: {
+          email,
+          firstName: input.firstName.trim(),
+          lastName: input.lastName.trim(),
+          role: 'CUSTOMER',
+          passwordHash,
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

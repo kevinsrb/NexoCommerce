@@ -16,14 +16,22 @@ export class LoginDto {
 }
 
 export class RegisterDto extends LoginDto {
+  @IsString()
   @MinLength(12)
+  @MaxLength(1024)
   declare password: string;
 
   @IsString()
   @MinLength(1)
   @MaxLength(100)
   @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
-  name!: string;
+  firstName!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
+  lastName!: string;
 }
 
 export class RefreshDto {

@@ -57,18 +57,55 @@ describe('Auth HTTP boundary', () => {
       requestId: response.headers['x-request-id'],
     });
   });
+  it('accepts firstName and lastName and registers only a CUSTOMER', async () => {
+    const createdAt = new Date();
+    prisma.user.create.mockImplementation(async ({ data }) => ({
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      createdAt,
+      updatedAt: createdAt,
+      ...data,
+    }));
+    const response = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        email: 'ada@example.com',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        password: 'long-enough-password',
+      })
+      .expect(201);
+    expect(response.body.user).toEqual({
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      email: 'ada@example.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'CUSTOMER',
+      createdAt: createdAt.toISOString(),
+    });
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        email: 'admin@example.com',
+        firstName: 'Admin',
+        lastName: 'User',
+        password: 'long-enough-password',
+        role: 'ADMIN',
+      })
+      .expect(400);
+  });
   it('validates registration fields and rejects privilege injection', async () => {
     await request(app.getHttpServer())
       .post('/auth/register')
-      .send({ email: 'bad', password: 'short', name: 'Ada' })
+      .send({ email: 'bad', password: 'short', firstName: 'Ada', lastName: 'Lovelace' })
       .expect(400);
     await request(app.getHttpServer())
       .post('/auth/register')
       .send({
         email: 'ada@example.com',
         password: 'long-enough-password',
-        name: 'Ada',
-        role: 'admin',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        role: 'ADMIN',
       })
       .expect(400);
     expect(prisma.user.create).not.toHaveBeenCalled();
@@ -77,7 +114,9 @@ describe('Auth HTTP boundary', () => {
     const user = {
       id: '550e8400-e29b-41d4-a716-446655440000',
       email: 'ada@example.com',
-      name: 'Ada',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      role: 'CUSTOMER',
       createdAt: new Date(),
       updatedAt: new Date(),
       passwordHash: 'never-public',
@@ -85,7 +124,12 @@ describe('Auth HTTP boundary', () => {
     prisma.user.create.mockResolvedValue(user);
     const registered = await request(app.getHttpServer())
       .post('/auth/register')
-      .send({ email: user.email, name: 'Ada', password: 'long-enough-password' })
+      .send({
+        email: user.email,
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        password: 'long-enough-password',
+      })
       .expect(201);
     expect(registered.body.user).not.toHaveProperty('passwordHash');
     prisma.user.findUnique.mockResolvedValue(user);
@@ -96,7 +140,9 @@ describe('Auth HTTP boundary', () => {
     expect(me.body).toEqual({
       id: user.id,
       email: user.email,
-      name: user.name,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
       createdAt: user.createdAt.toISOString(),
     });
     await request(app.getHttpServer())
@@ -113,6 +159,20 @@ describe('Auth HTTP boundary', () => {
       .post('/auth/refresh')
       .send({ refreshToken: 'malformed' })
       .expect(401);
+  });
+  it('rejects 1025-character passwords at both registration and login before persistence', async () => {
+    const credentials = { email: 'ada@example.com', password: 'x'.repeat(1025) };
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        ...credentials,
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+      })
+      .expect(400);
+    await request(app.getHttpServer()).post('/auth/login').send(credentials).expect(400);
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.user.create).not.toHaveBeenCalled();
   });
   it('sanitizes unexpected persistence failures and malformed JSON', async () => {
     prisma.user.findUnique.mockRejectedValue(new Error('private database details'));
