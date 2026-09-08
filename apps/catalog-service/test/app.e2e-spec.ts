@@ -236,6 +236,22 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     expect(prisma.product.create).not.toHaveBeenCalled();
   });
 
+  it('rejects nested variant arrays before persistence when creating a product', async () => {
+    await request(app.getHttpServer())
+      .post('/products')
+      .send({ ...input, variants: [[]] })
+      .expect(400);
+    expect(prisma.product.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects nested variant arrays before persistence when patching a product', async () => {
+    await request(app.getHttpServer())
+      .patch(`/products/${productId}`)
+      .send({ variants: [[]] })
+      .expect(400);
+    expect(prisma.product.update).not.toHaveBeenCalled();
+  });
+
   it('rejects invalid patches, IDs, pagination, and category fields before persistence', async () => {
     await request(app.getHttpServer())
       .patch('/products/not-a-uuid')
@@ -289,6 +305,21 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
       .expect(400);
     expect(malformed.body.message).toBe('Bad request');
     expect(malformed.body.requestId).toBe(malformed.headers['x-request-id']);
+  });
+
+  it('returns a safe 413 error for an oversized JSON request body', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/products')
+      .set('x-request-id', productId)
+      .send({ ...input, description: 'x'.repeat(110_000) })
+      .expect(413);
+    expect(response.body).toEqual({
+      statusCode: 413,
+      code: 'PAYLOAD_TOO_LARGE',
+      message: 'Payload too large',
+      requestId: productId,
+    });
+    expect(prisma.product.create).not.toHaveBeenCalled();
   });
 
   it('serves liveness, security headers, CORS, and request correlation without database access', async () => {

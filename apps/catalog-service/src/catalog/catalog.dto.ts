@@ -5,6 +5,7 @@ import {
   IsArray,
   IsBoolean,
   IsInt,
+  IsObject,
   IsString,
   IsUUID,
   Matches,
@@ -73,6 +74,7 @@ export class CreateProductDto extends CreateCategoryDto {
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(100)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => CreateVariantDto)
   variants!: CreateVariantDto[];
@@ -108,6 +110,7 @@ export class UpdateProductDto {
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(100)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => CreateVariantDto)
   variants?: CreateVariantDto[];

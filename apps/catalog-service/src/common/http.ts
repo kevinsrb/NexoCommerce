@@ -16,6 +16,15 @@ import { Prisma } from '../../generated/client';
 const logger = createLogger('catalog-service');
 type ContextRequest = Request & { requestId?: string };
 
+const isPayloadTooLargeError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const parserError = error as { status?: unknown; statusCode?: unknown; type?: unknown };
+  return (
+    parserError.type === 'entity.too.large' &&
+    (parserError.status === 413 || parserError.statusCode === 413)
+  );
+};
+
 @Catch()
 class HttpExceptionFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost): void {
@@ -26,7 +35,8 @@ class HttpExceptionFilter implements ExceptionFilter {
       error instanceof Prisma.PrismaClientKnownRequestError
         ? { P2002: 409, P2003: 400, P2025: 404 }[error.code]
         : undefined;
-    const statusCode = databaseError ?? (error instanceof HttpException ? error.getStatus() : 500);
+    const statusCode = databaseError ??
+      (isPayloadTooLargeError(error) ? 413 : error instanceof HttpException ? error.getStatus() : 500);
     const codes: Record<number, string> = {
       400: 'BAD_REQUEST',
       401: 'UNAUTHORIZED',
@@ -43,6 +53,8 @@ class HttpExceptionFilter implements ExceptionFilter {
           ? 'Internal server error'
           : statusCode === 400
             ? 'Bad request'
+            : statusCode === 413
+              ? 'Payload too large'
             : databaseError
               ? statusCode === 409
                 ? 'Resource already exists'
