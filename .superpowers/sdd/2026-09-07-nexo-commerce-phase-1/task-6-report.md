@@ -121,3 +121,21 @@ Only the `pnpm dev` child process tree started for this smoke was interrupted. T
 | `pnpm lint` | Exit 0; Turbo: 8 successful tasks. |
 | `pnpm typecheck` | Exit 0; Turbo: 11 successful tasks. |
 | `pnpm test` | Exit 0; Turbo: 8 successful tasks; Gateway now has 2 suites / 5 tests, and all workspace suites passed. |
+
+## Fix round 2 — shell environment precedence regression
+
+The Gateway dotenv loader already used dotenv's default non-overriding behavior, so no production behavior change was required. A regression was added using a real temporary `.env` file with conflicting `NODE_ENV=test` and `PORT=43123`, alongside a supplied runtime environment with `NODE_ENV=production` and `PORT=43124`. It also supplies an unset `GATEWAY_LABEL` key from the dotenv file.
+
+The untouched loader first passed the new behavior test. To produce an explicit RED proof, the loader was temporarily mutated to `override: true`; the focused test then failed exactly because dotenv values replaced the supplied shell values:
+
+```text
+- Expected: "NODE_ENV": "production", "PORT": 43124
++ Received: "NODE_ENV": "test", "PORT": 43123
+```
+
+The temporary mutation was restored; no production source change remains from this round. GREEN validation:
+
+| Command | Result |
+| --- | --- |
+| `pnpm --filter @nexo/api-gateway test -- environment-spec.ts` | Exit 0; 1 suite / 3 tests passed, including shell precedence and unset-key loading. |
+| `pnpm --filter @nexo/api-gateway test` | Exit 0; 2 suites / 6 tests passed. |

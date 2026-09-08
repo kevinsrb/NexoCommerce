@@ -25,4 +25,25 @@ describe('API gateway environment', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it('preserves supplied shell values while loading unset dotenv keys', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'nexo-gateway-environment-'));
+    const environment: Record<string, string> = {
+      NODE_ENV: 'production',
+      PORT: '43124',
+    };
+    const environmentFile = join(directory, '.env');
+
+    try {
+      writeFileSync(environmentFile, 'NODE_ENV=test\nPORT=43123\nGATEWAY_LABEL=local\n');
+
+      expect(loadEnvironment(environment, environmentFile)).toEqual({
+        NODE_ENV: 'production',
+        PORT: 43124,
+      });
+      expect(environment.GATEWAY_LABEL).toBe('local');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
