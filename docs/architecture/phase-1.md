@@ -1,0 +1,61 @@
+# Phase 1 architecture
+
+## Purpose
+
+Phase 1 provides the smallest independently runnable Nexo Commerce platform foundation. It establishes a strict TypeScript workspace, local infrastructure, explicit service ownership, safe HTTP conventions, and a storefront shell without deciding future gateway routing or service-integration protocols.
+
+## Components
+
+```mermaid
+flowchart TB
+  Web[Next.js storefront\napps/web] -->|future integration seam| Gateway[API gateway\nNestJS + Express]
+  Gateway -->|Phase 1: no proxy| Boundary[Integration boundary module]
+  Auth[Auth service\nNestJS + Express] --> AuthDB[(auth_db)]
+  Catalog[Catalog service\nNestJS + Express] --> CatalogDB[(catalog_db)]
+  PG[PostgreSQL 16 container] --> AuthDB
+  PG --> CatalogDB
+  Redis[Redis 7 container\nprovisioned, unused]
+  Gateway --> Shared[contracts/config/logger]
+  Auth --> Shared
+  Catalog --> Shared
+```
+
+`apps/web` is a Next.js App Router presentation shell. Its displayed products are local fixtures; the `NEXT_PUBLIC_CATALOG_API_URL` example is reserved for later browser-safe configuration and is not consumed in this phase.
+
+`apps/api-gateway` uses the `/api` prefix and provides `GET /api/health` plus Swagger at `/api/docs`. Its integration boundary module is intentionally empty: it does not proxy or aggregate Auth/Catalog traffic in Phase 1.
+
+`apps/auth-service` owns registrations, logins, refresh-token rotation, and authenticated identity lookup. `apps/catalog-service` owns category/product/variant reads and writes. These applications are independently startable NestJS applications using the Express platform adapter.
+
+## Data ownership
+
+The local Docker Compose PostgreSQL server initializes two databases: `auth_db` and `catalog_db`. This is logical database-per-service isolation for local development, not two separate PostgreSQL servers. Auth alone owns its Prisma schema, migration history, generated client, and `User`/`RefreshToken` tables. Catalog alone owns the equivalent artifacts for `Category`, `Product`, and `ProductVariant`. No persistence package is shared, and one service does not import another service's entities or tables.
+
+Redis has a persistent Compose volume and health check but no Phase 1 code consumes it.
+
+## HTTP and configuration safeguards
+
+The backend services run on NestJS with Express, and each configures:
+
+- Helmet and CORS (all origins, no credentials in the current configuration).
+- DTO validation with transformation, whitelisting, and rejection of unknown fields.
+- An `x-request-id`: a valid inbound UUID is propagated; otherwise a UUID is generated. It is included in every response and public error envelope.
+- Structured request-completion logs that contain method, path, status, duration, service, and request ID; request bodies, query strings, and headers are not logged by this middleware.
+- A global exception boundary with public `{ statusCode, code, message, requestId }` errors and no persistence internals/stack traces.
+
+The configuration package validates `NODE_ENV`, ports, and service-specific required values at runtime. Auth requires a PostgreSQL `DATABASE_URL`, two distinct secrets of at least 32 characters, and bounded positive JWT TTL values. Catalog requires a PostgreSQL `DATABASE_URL`. The `.env.example` files contain the local values and ports; see the root README for the required setup and the difference between service startup and direct root-level Prisma validation.
+
+Auth hashes passwords and refresh tokens with Argon2. Its access and refresh tokens use independent secrets; refresh rotation revokes the source token before issuing the replacement. `GET /auth/me` is JWT-protected.
+
+## Catalog boundary
+
+Public Catalog reads are `GET /products`, `GET /products/:slug`, and `GET /categories`. The write routes (`POST /categories`, `POST /products`, and `PATCH /products/:id`) are **temporary unauthenticated administration endpoints**. Their lack of authorization is deliberately explicit and is not suitable for public production administration. Authorization is deferred until a cross-service boundary is selected.
+
+Catalog validates and maps persistence objects to deliberate public response shapes. Product creation is atomic with its variants. Product pricing accepts decimal strings rather than JavaScript numbers to avoid float corruption, and stores `DECIMAL(18,2)` values. Details of the current HTTP contract are in [the Catalog service README](../../apps/catalog-service/README.md).
+
+## Operational sequence
+
+For a clean local Docker environment, first copy root and app `.env.example` files, run `pnpm db:up`, generate both Prisma clients, and deploy both service migrations before starting database-backed services. Auth and Catalog load their app-local `.env` files through `dotenv/config`. The current API gateway reads process environment directly rather than loading its `.env`; its default port is `3000`, which conflicts with the default Next.js storefront port. Start it separately with a shell `PORT` override (for example `3003`) when running the storefront. Compose health endpoints and application `/health` routes are liveness indicators. In particular, `/health` does not prove that a database connection or migration is live.
+
+## Deliberately deferred
+
+This phase does not implement a cart, orders, checkout/payments, notifications, message brokers, dynamic gateway proxying, distributed authorization, live storefront catalog data, Redis integration, Kubernetes, Terraform, or production deployment. Those omissions keep the first phase focused on stable ownership boundaries rather than prematurely committing to integration protocols.
