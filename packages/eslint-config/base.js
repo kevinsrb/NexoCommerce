@@ -5,7 +5,7 @@ module.exports = typescriptEslint.config(
     ignores: ['dist/**', 'coverage/**', 'node_modules/**'],
   },
   {
-    files: ['**/*.ts'],
+    files: ['**/*.{ts,tsx}'],
     extends: [typescriptEslint.configs.recommended],
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
