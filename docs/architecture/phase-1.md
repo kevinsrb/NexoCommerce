@@ -54,7 +54,7 @@ Catalog validates and maps persistence objects to deliberate public response sha
 
 ## Operational sequence
 
-For a clean local Docker environment, first copy root and app `.env.example` files, run `pnpm db:up`, generate both Prisma clients, and deploy both service migrations before starting database-backed services. Auth and Catalog load their app-local `.env` files through `dotenv/config`. The current API gateway reads process environment directly rather than loading its `.env`; its default port is `3000`, which conflicts with the default Next.js storefront port. Start it separately with a shell `PORT` override (for example `3003`) when running the storefront. Compose health endpoints and application `/health` routes are liveness indicators. In particular, `/health` does not prove that a database connection or migration is live.
+For a clean local Docker environment, first copy root and app `.env.example` files, run `pnpm db:up`, generate both Prisma clients, and deploy both service migrations before starting database-backed services. Gateway loads its app-local `.env` through `dotenv`; Auth and Catalog use `dotenv/config`. Their default ports are 3003, 3001, and 3002 respectively, while the Next.js storefront uses 3000; `pnpm dev` can therefore start all four applications without a listener collision. Compose health endpoints and application `/health` routes are liveness indicators. In particular, `/health` does not prove that a database connection or migration is live.
 
 ## Deliberately deferred
 

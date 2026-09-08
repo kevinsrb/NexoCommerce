@@ -72,29 +72,16 @@ pnpm auth:prisma:generate
 pnpm catalog:prisma:generate
 pnpm auth:prisma:migrate
 pnpm catalog:prisma:migrate
-pnpm --filter @nexo/web dev
+pnpm dev
 ```
 
-`pnpm db:up` starts PostgreSQL and Redis using the root `.env`. On a new Compose volume, PostgreSQL's init script creates `auth_db` and `catalog_db`; migrations then create the service-owned tables. Do not start the applications against an un-migrated database if you intend to use database-backed routes. Start the remaining backends in separate terminals:
-
-```powershell
-# API gateway: the current bootstrap reads process environment, not apps/api-gateway/.env.
-# Use 3003 while the storefront uses its default port 3000.
-$env:PORT = '3003'
-pnpm --filter @nexo/api-gateway start:dev
-
-# These applications load the .env in their own app directory through dotenv/config.
-pnpm --filter @nexo/auth-service dev
-pnpm --filter @nexo/catalog-service dev
-```
-
-The root `pnpm dev` command is available through Turbo, but it starts both the web app and API gateway with their current default port of `3000`; do not use it for an all-services local launch until one port is changed. The individual commands above work with the checked-in default configuration.
+`pnpm db:up` starts PostgreSQL and Redis using the root `.env`. On a new Compose volume, PostgreSQL's init script creates `auth_db` and `catalog_db`; migrations then create the service-owned tables. Do not start the applications against an un-migrated database if you intend to use database-backed routes. `pnpm dev` starts the storefront on 3000, API gateway on 3003, Auth on 3001, and Catalog on 3002. The backend applications load their own app-local `.env` files; the web development server uses its default port 3000.
 
 After startup, the local addresses are:
 
 - Storefront: `http://localhost:3000`
-- API gateway health (with the setup override): `http://localhost:3003/api/health`
-- API gateway Swagger UI (with the setup override): `http://localhost:3003/api/docs`
+- API gateway health: `http://localhost:3003/api/health`
+- API gateway Swagger UI: `http://localhost:3003/api/docs`
 - Auth health: `http://localhost:3001/health`
 - Catalog health: `http://localhost:3002/health`
 
@@ -107,12 +94,12 @@ Copy each example file rather than committing a real `.env` file. The validation
 | Location | Variables | Purpose/default |
 | --- | --- | --- |
 | `.env` | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`, `REDIS_PORT` | Compose credentials and host ports. Defaults in `.env.example`: `nexo`, `nexo_local_password`, `5432`, `6379`. |
-| `apps/api-gateway/.env` | `NODE_ENV`, `PORT` | Documents the intended Gateway values (`PORT=3000`; `NODE_ENV` accepts `development`, `test`, or `production`). The current Gateway bootstrap does not load this file; set process environment variables in the shell when overriding its defaults. |
+| `apps/api-gateway/.env` | `NODE_ENV`, `PORT` | Gateway runtime; `PORT=3003`. `NODE_ENV` accepts `development`, `test`, or `production`. |
 | `apps/auth-service/.env` | `NODE_ENV`, `PORT`, `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_ACCESS_TTL_SECONDS`, `JWT_REFRESH_TTL_SECONDS` | Auth runtime; `PORT=3001`, PostgreSQL `auth_db`, and TTL defaults of 900/604800 seconds. JWT secrets must be at least 32 characters and different. |
 | `apps/catalog-service/.env` | `NODE_ENV`, `PORT`, `DATABASE_URL` | Catalog runtime; `PORT=3002` and PostgreSQL `catalog_db`. |
 | `apps/web/.env` | `NEXT_PUBLIC_CATALOG_API_URL` | Reserved browser-safe configuration. The current storefront does not consume it; the example value is `http://localhost:3001`. |
 
-Normal Auth and Catalog service starts load the `.env` in their own application directory through `dotenv/config`. Prisma operations need `DATABASE_URL` too. The root alias commands below run Prisma from the relevant service and read that service’s `.env`; use the explicit environment setup only when validating a schema directly from the root:
+Normal Gateway starts load the `.env` in its application directory with `dotenv`; Auth and Catalog use `dotenv/config` for the same app-local behavior. Prisma operations need `DATABASE_URL` too. The root alias commands below run Prisma from the relevant service and read that service’s `.env`; use the explicit environment setup only when validating a schema directly from the root:
 
 ```powershell
 # Auth schema validation from the repository root (does not contact PostgreSQL)
@@ -134,7 +121,7 @@ Run these root commands from the repository root:
 
 | Command | Meaning |
 | --- | --- |
-| `pnpm dev` | Run all workspace development scripts through Turbo. With the checked-in defaults, Web and Gateway both bind port 3000, so use the individual start commands (and a Gateway `PORT` override) for a concurrent local launch. |
+| `pnpm dev` | Run all workspace development scripts through Turbo: Web 3000, Gateway 3003, Auth 3001, and Catalog 3002 with copied app-local environment files. |
 | `pnpm build` | Build all workspace packages/apps through Turbo. |
 | `pnpm lint` | Lint all workspace packages/apps through Turbo. |
 | `pnpm test` | Run all workspace test suites through Turbo. |
@@ -150,7 +137,7 @@ Useful individual commands:
 
 ```powershell
 pnpm --filter @nexo/web dev
-$env:PORT = '3003'; pnpm --filter @nexo/api-gateway start:dev
+pnpm --filter @nexo/api-gateway start:dev
 pnpm --filter @nexo/auth-service dev
 pnpm --filter @nexo/catalog-service dev
 

@@ -59,3 +59,65 @@ Consequently, no live PostgreSQL migration, database-backed route, or health che
 - Confirmed documented direct Prisma validation commands work exactly with explicit shell `DATABASE_URL` values.
 - Confirmed docs distinguish normal Auth/Catalog service startup from direct root-level Prisma validation, and distinguish logical local database isolation from physical production isolation.
 - Confirmed Phase 1 safeguards and exclusions, including temporary unauthenticated Catalog write endpoints, are explicit.
+
+## Fix round 1 — root development launch
+
+### Root cause and failing evidence
+
+Review found that the documented `pnpm dev` flow was not functional. The shared `parseBaseEnvironment` default remains port 3000. The Gateway called it directly, did not load its app-local `.env`, and `apps/api-gateway/.env.example` also specified 3000. A first `pnpm dev` smoke exposed a second required condition: Turbo starts scripts named `dev`, but the Gateway only had `start:dev`, so Turbo did not start the Gateway at all.
+
+The focused test was added before the Gateway environment implementation and failed as expected:
+
+```text
+FAIL test/environment-spec.ts
+TS2307: Cannot find module '../src/common/environment' or its corresponding type declarations.
+```
+
+The first root smoke had no listener-bind error; its complete Turbo task-start set was only:
+
+```text
+@nexo/web:dev: $ next dev
+@nexo/auth-service:dev: $ ts-node src/main.ts
+@nexo/catalog-service:dev: $ ts-node src/main.ts
+```
+
+There was no `@nexo/api-gateway:dev` task. The Web process announced `http://localhost:3000`; Auth and Catalog each logged `Nest application successfully started`. This is the direct runtime evidence for the missing Gateway `dev` script. The smoke process was stopped and its listeners were confirmed absent before the correction.
+
+### Correction
+
+- Added the Gateway-local environment loader at `apps/api-gateway/src/common/environment.ts`. It loads the `.env` adjacent to the application through `dotenv`, preserves shell-variable precedence, and applies an application-only default of port 3003 without changing `@nexo/config`'s shared base default of 3000.
+- Updated Gateway bootstrap to use that loader, declared the existing `dotenv` runtime dependency, changed `apps/api-gateway/.env.example` to `PORT=3003`, and added the required standard `dev` script alongside `start:dev`.
+- Added `apps/api-gateway/test/environment-spec.ts`. It verifies the Gateway-specific 3003 default and uses a real temporary dotenv file to verify loading into a supplied runtime environment. The test passed after the implementation (2 tests).
+- Updated the README and Phase 1 architecture note to describe the normal copied-app-environment root flow and correct gateway endpoint `http://localhost:3003`.
+
+### Runtime smoke evidence
+
+Temporary ignored app-local `.env` files were created with the documented values solely for this smoke: Gateway 3003, Auth 3001 with valid distinct JWT secrets and PostgreSQL URL, Catalog 3002 with PostgreSQL URL, and the Web example value. No database request was made.
+
+The corrected `pnpm dev` output included all four scripts:
+
+```text
+@nexo/web:dev: $ next dev
+@nexo/api-gateway:dev: $ ts-node src/main.ts
+@nexo/auth-service:dev: $ ts-node src/main.ts
+@nexo/catalog-service:dev: $ ts-node src/main.ts
+```
+
+The Gateway logged the mapped `/api/health` route and `Nest application successfully started`; Auth and Catalog also logged successful Nest startup; Web reported ready at `http://localhost:3000`. A live listener assertion reported exactly:
+
+```text
+Bound listeners: 3000, 3001, 3002, 3003
+```
+
+Only the `pnpm dev` child process tree started for this smoke was interrupted. The post-stop assertion reported `Smoke-test listeners stopped.` The temporary ignored `.env` files were then removed.
+
+### Fix-round validation
+
+| Command | Result |
+| --- | --- |
+| `pnpm install` | Exit 0. Workspace lockfile was refreshed for the Gateway's declared `dotenv` dependency. |
+| `pnpm --filter @nexo/api-gateway test -- environment-spec.ts` | Exit 0 after implementation; 1 suite / 2 tests passed. |
+| `pnpm build` | Exit 0; Turbo: 8 successful tasks. |
+| `pnpm lint` | Exit 0; Turbo: 8 successful tasks. |
+| `pnpm typecheck` | Exit 0; Turbo: 11 successful tasks. |
+| `pnpm test` | Exit 0; Turbo: 8 successful tasks; Gateway now has 2 suites / 5 tests, and all workspace suites passed. |

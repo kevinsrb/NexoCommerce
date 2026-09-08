@@ -4,11 +4,11 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { parseBaseEnvironment } from '@nexo/config';
 import { createLogger } from '@nexo/logger';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import { loadEnvironment } from './common/environment';
 import { HttpExceptionFilter } from './common/http/http-exception.filter';
 import { requestCompletionLoggingMiddleware } from './common/http/request-completion-logging.middleware';
 import { requestIdMiddleware } from './common/http/request-id.middleware';
@@ -42,7 +42,7 @@ export const configureSwagger = (app: NestExpressApplication): void => {
 };
 
 export const bootstrap = async (): Promise<void> => {
-  const environment = parseBaseEnvironment(process.env);
+  const environment = loadEnvironment();
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   configureHttpApp(app);
