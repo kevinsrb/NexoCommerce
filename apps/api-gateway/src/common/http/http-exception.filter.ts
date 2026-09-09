@@ -17,6 +17,7 @@ const statusCodeToErrorCode = (statusCode: number): string => {
     [HttpStatus.FORBIDDEN]: 'FORBIDDEN',
     [HttpStatus.NOT_FOUND]: 'NOT_FOUND',
     [HttpStatus.CONFLICT]: 'CONFLICT',
+    [HttpStatus.PAYLOAD_TOO_LARGE]: 'PAYLOAD_TOO_LARGE',
   };
 
   return errorCodes[statusCode] ?? 'INTERNAL_SERVER_ERROR';
@@ -24,6 +25,15 @@ const statusCodeToErrorCode = (statusCode: number): string => {
 
 const hasMessage = (response: object): response is { message?: string | string[] } =>
   'message' in response;
+
+const isPayloadTooLargeError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const parserError = error as { status?: unknown; statusCode?: unknown; type?: unknown };
+  return (
+    parserError.type === 'entity.too.large' &&
+    (parserError.status === 413 || parserError.statusCode === 413)
+  );
+};
 
 const exceptionMessage = (exception: HttpException): string => {
   const response = exception.getResponse();
@@ -42,17 +52,22 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const context = host.switchToHttp();
     const response = context.getResponse<Response>();
     const request = context.getRequest<Request>();
-    const statusCode =
-      exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
+    const statusCode = isPayloadTooLargeError(exception)
+      ? HttpStatus.PAYLOAD_TOO_LARGE
+      : exception instanceof HttpException
+        ? exception.getStatus()
+        : HttpStatus.INTERNAL_SERVER_ERROR;
     const body: ApiError = {
       statusCode,
       code: statusCodeToErrorCode(statusCode),
       message:
         statusCode === HttpStatus.BAD_REQUEST
           ? 'Bad request'
-          : exception instanceof HttpException
-            ? exceptionMessage(exception)
-            : 'Internal server error',
+          : statusCode === HttpStatus.PAYLOAD_TOO_LARGE
+            ? 'Payload too large'
+            : exception instanceof HttpException
+              ? exceptionMessage(exception)
+              : 'Internal server error',
       requestId: getRequestId(request) ?? 'unknown',
     };
 

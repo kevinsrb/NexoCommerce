@@ -15,7 +15,7 @@ export const requestCompletionLoggingMiddleware =
 
       requestLogger.info({
         method: request.method,
-        path: request.originalUrl,
+        path: request.path,
         statusCode: response.statusCode,
         duration,
       });

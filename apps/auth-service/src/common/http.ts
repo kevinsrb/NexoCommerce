@@ -15,19 +15,33 @@ import helmet from 'helmet';
 const logger = createLogger('auth-service');
 type ContextRequest = Request & { requestId?: string };
 
+const isPayloadTooLargeError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const parserError = error as { status?: unknown; statusCode?: unknown; type?: unknown };
+  return (
+    parserError.type === 'entity.too.large' &&
+    (parserError.status === 413 || parserError.statusCode === 413)
+  );
+};
+
 @Catch()
 class HttpExceptionFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
     const request = context.getRequest<ContextRequest>();
     const response = context.getResponse<Response>();
-    const statusCode = error instanceof HttpException ? error.getStatus() : 500;
+    const statusCode = isPayloadTooLargeError(error)
+      ? 413
+      : error instanceof HttpException
+        ? error.getStatus()
+        : 500;
     const codes: Record<number, string> = {
       400: 'BAD_REQUEST',
       401: 'UNAUTHORIZED',
       403: 'FORBIDDEN',
       404: 'NOT_FOUND',
       409: 'CONFLICT',
+      413: 'PAYLOAD_TOO_LARGE',
     };
     const body: ApiError = {
       statusCode,
@@ -37,9 +51,11 @@ class HttpExceptionFilter implements ExceptionFilter {
           ? 'Internal server error'
           : statusCode === 400
             ? 'Bad request'
-            : error instanceof HttpException
-              ? error.message
-              : 'Internal server error',
+            : statusCode === 413
+              ? 'Payload too large'
+              : error instanceof HttpException
+                ? error.message
+                : 'Internal server error',
       requestId: request.requestId ?? 'unknown',
     };
     response.status(statusCode).json(body);

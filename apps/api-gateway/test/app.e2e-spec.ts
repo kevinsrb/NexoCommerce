@@ -3,7 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
-import { configureHttpApp } from '../src/main';
+import { configureHttpApp, configureSwagger } from '../src/main';
 
 describe('API gateway HTTP boundary', () => {
   let app: NestExpressApplication;
@@ -15,6 +15,7 @@ describe('API gateway HTTP boundary', () => {
 
     app = moduleFixture.createNestApplication<NestExpressApplication>();
     configureHttpApp(app);
+    configureSwagger(app);
     await app.init();
   });
 
@@ -37,6 +38,28 @@ describe('API gateway HTTP boundary', () => {
       .expect(204);
 
     expect(response.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
+  it('hosts Swagger under the public API prefix', async () => {
+    const response = await request(app.getHttpServer()).get('/api/docs').expect(200);
+    expect(response.headers['content-type']).toMatch(/text\/html/);
+    expect(response.text).toContain('Swagger UI');
+    await request(app.getHttpServer()).get('/docs').expect(404);
+  });
+
+  it('returns a safe 413 error for an oversized JSON request body', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/health')
+      .send({ privateDetails: 'secret'.repeat(20_000) })
+      .expect(413);
+
+    expect(response.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(response.body).toEqual({
+      statusCode: 413,
+      code: 'PAYLOAD_TOO_LARGE',
+      message: 'Payload too large',
+      requestId: response.headers['x-request-id'],
+    });
   });
 
   it('formats malformed JSON as a public API error', async () => {

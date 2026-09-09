@@ -189,4 +189,19 @@ describe('Auth HTTP boundary', () => {
     expect(malformed.body.message).toBe('Bad request');
     expect(malformed.body.requestId).toBe(malformed.headers['x-request-id']);
   });
+
+  it('returns a safe 413 error for an oversized JSON request body', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ password: 'secret'.repeat(20_000) })
+      .expect(413);
+
+    expect(response.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(response.body).toEqual({
+      statusCode: 413,
+      code: 'PAYLOAD_TOO_LARGE',
+      message: 'Payload too large',
+      requestId: response.headers['x-request-id'],
+    });
+  });
 });
