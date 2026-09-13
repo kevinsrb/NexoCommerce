@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Phase 1 provides the smallest independently runnable Nexo Commerce platform foundation. It establishes a strict TypeScript workspace, local infrastructure, explicit service ownership, safe HTTP conventions, and a storefront shell. Its target public topology places the API Gateway between the browser-facing frontend and the domain services; the concrete Gateway routing protocol remains deferred.
+Phase 1 provides the smallest independently runnable Nexo Commerce platform foundation. It establishes a strict TypeScript workspace, local infrastructure, explicit service ownership, safe HTTP conventions, and a storefront shell. Its public topology places the API Gateway between the browser-facing frontend and the domain services, with active HTTP/REST forwarding for Auth and Catalog.
 
 ## Components
 
@@ -25,11 +25,11 @@ flowchart LR
   Catalog --> Shared
 ```
 
-The diagram describes the **target public API topology**. Browser-facing application traffic reaches Auth and Catalog only through the API Gateway; neither microservice is a browser-facing API in that topology.
+Browser-facing application traffic reaches Auth and Catalog only through the API Gateway; neither microservice is a browser-facing API. The Gateway's public routes are `/api/auth/*`, `/api/products/*`, and `/api/categories`.
 
-`apps/web` is a Next.js App Router presentation shell. Its displayed products are local fixtures, so it currently makes no Catalog or Auth call. `NEXT_PUBLIC_CATALOG_API_URL` is reserved for later browser-safe configuration and, before it is consumed, must be configured to use the Gateway's public API rather than a microservice URL.
+`apps/web` is a Next.js App Router storefront. Its product client calls `${NEXT_PUBLIC_API_GATEWAY_URL}/products`, maps the Catalog public response into the product cards, and renders loading, empty, error, and ready states. The only browser API URL it receives is the Gateway URL; it has no Catalog Service configuration.
 
-`apps/api-gateway` uses the `/api` prefix and provides `GET /api/health` plus Swagger at `/api/docs`. Its integration boundary module is intentionally empty in the current implementation: it does not yet proxy or aggregate Auth/Catalog traffic. That missing routing is an implementation gap against the target topology, not a direct browser-to-microservice design.
+`apps/api-gateway` uses the `/api` prefix and provides `GET /api/health` plus Swagger at `/api/docs`. `AUTH_SERVICE_URL` and `CATALOG_SERVICE_URL` are required internal REST origins. The Gateway forwards the known Auth, Product, and Category routes with their method, query string, JSON body, `Authorization`, `Accept`, `Content-Type`, and Gateway request ID. Upstream HTTP responses retain their status and body; a connection failure or timeout becomes the public `503 SERVICE_UNAVAILABLE` envelope without disclosing service details.
 
 `apps/auth-service` owns registrations, logins, refresh-token rotation, and authenticated identity lookup. `apps/catalog-service` owns category/product/variant reads and writes. These applications are independently startable NestJS applications using the Express platform adapter.
 
@@ -43,7 +43,7 @@ Redis has a persistent Compose volume and health check but no Phase 1 code consu
 
 The backend services run on NestJS with Express, and each configures:
 
-- Helmet and CORS (all origins, no credentials in the current configuration).
+- Helmet. The Gateway alone enables browser CORS; Auth and Catalog are internal HTTP targets.
 - DTO validation with transformation, whitelisting, and rejection of unknown fields.
 - An `x-request-id`: a valid inbound UUID is propagated; otherwise a UUID is generated. It is included in every response and public error envelope.
 - Structured request-completion logs that contain method, path, status, duration, service, and request ID; request bodies, query strings, and headers are not logged by this middleware.
@@ -61,8 +61,8 @@ Catalog validates and maps persistence objects to deliberate public response sha
 
 ## Operational sequence
 
-For a clean local Docker environment, first copy root and app `.env.example` files, run `pnpm db:up`, generate both Prisma clients, and deploy both service migrations before starting database-backed services. Gateway loads its app-local `.env` through `dotenv`; Auth and Catalog use `dotenv/config`. Their default ports are 3003, 3001, and 3002 respectively, while the Next.js storefront uses 3000; `pnpm dev` can therefore start all four applications without a listener collision. Compose health endpoints and application `/health` routes are liveness indicators. In particular, `/health` does not prove that a database connection or migration is live.
+For a clean local Docker environment, first copy root and app `.env.example` files, run `pnpm db:up`, generate both Prisma clients, and deploy both service migrations before starting database-backed services. Gateway loads its app-local `.env` through `dotenv` and requires internal `AUTH_SERVICE_URL`/`CATALOG_SERVICE_URL`; Auth and Catalog use `dotenv/config`. Their default ports are 3003, 3001, and 3002 respectively, while the Next.js storefront uses 3000 and requires `NEXT_PUBLIC_API_GATEWAY_URL=http://localhost:3003/api`; `pnpm dev` can therefore start all four applications without a listener collision. Compose health endpoints and application `/health` routes are liveness indicators. In particular, `/health` does not prove that a database connection or migration is live.
 
 ## Deliberately deferred
 
-This phase does not implement a cart, orders, checkout/payments, notifications, message brokers, dynamic gateway proxying, distributed authorization, live storefront catalog data, Redis integration, Kubernetes, Terraform, or production deployment. Those omissions keep the first phase focused on stable ownership boundaries rather than prematurely committing to integration protocols.
+This phase does not implement a cart, orders, checkout/payments, notifications, message brokers, distributed authorization, Redis integration, Kubernetes, Terraform, or production deployment. Those omissions keep the first phase focused on stable ownership boundaries and a narrow HTTP integration protocol.

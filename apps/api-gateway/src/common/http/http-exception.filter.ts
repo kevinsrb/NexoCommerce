@@ -18,6 +18,7 @@ const statusCodeToErrorCode = (statusCode: number): string => {
     [HttpStatus.NOT_FOUND]: 'NOT_FOUND',
     [HttpStatus.CONFLICT]: 'CONFLICT',
     [HttpStatus.PAYLOAD_TOO_LARGE]: 'PAYLOAD_TOO_LARGE',
+    [HttpStatus.SERVICE_UNAVAILABLE]: 'SERVICE_UNAVAILABLE',
   };
 
   return errorCodes[statusCode] ?? 'INTERNAL_SERVER_ERROR';

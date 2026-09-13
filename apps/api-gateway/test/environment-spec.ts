@@ -6,7 +6,17 @@ import { loadEnvironment, parseEnvironment } from '../src/common/environment';
 
 describe('API gateway environment', () => {
   it('defaults its listener to port 3003 without changing the shared base default', () => {
-    expect(parseEnvironment({})).toEqual({ NODE_ENV: 'development', PORT: 3003 });
+    expect(
+      parseEnvironment({
+        AUTH_SERVICE_URL: 'http://auth.internal.test',
+        CATALOG_SERVICE_URL: 'http://catalog.internal.test',
+      }),
+    ).toEqual({
+      NODE_ENV: 'development',
+      PORT: 3003,
+      AUTH_SERVICE_URL: 'http://auth.internal.test',
+      CATALOG_SERVICE_URL: 'http://catalog.internal.test',
+    });
   });
 
   it('loads a gateway app-local dotenv file into the runtime environment', () => {
@@ -15,11 +25,16 @@ describe('API gateway environment', () => {
     const environmentFile = join(directory, '.env');
 
     try {
-      writeFileSync(environmentFile, 'NODE_ENV=test\nPORT=43123\n');
+      writeFileSync(
+        environmentFile,
+        'NODE_ENV=test\nPORT=43123\nAUTH_SERVICE_URL=http://auth.internal.test\nCATALOG_SERVICE_URL=http://catalog.internal.test\n',
+      );
 
       expect(loadEnvironment(environment, environmentFile)).toEqual({
         NODE_ENV: 'test',
         PORT: 43123,
+        AUTH_SERVICE_URL: 'http://auth.internal.test',
+        CATALOG_SERVICE_URL: 'http://catalog.internal.test',
       });
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -28,18 +43,25 @@ describe('API gateway environment', () => {
 
   it('preserves supplied shell values while loading unset dotenv keys', () => {
     const directory = mkdtempSync(join(tmpdir(), 'nexo-gateway-environment-'));
-    const environment: Record<string, string> = {
-      NODE_ENV: 'production',
-      PORT: '43124',
-    };
+      const environment: Record<string, string> = {
+        NODE_ENV: 'production',
+        PORT: '43124',
+        AUTH_SERVICE_URL: 'http://shell-auth.internal.test',
+        CATALOG_SERVICE_URL: 'http://shell-catalog.internal.test',
+      };
     const environmentFile = join(directory, '.env');
 
     try {
-      writeFileSync(environmentFile, 'NODE_ENV=test\nPORT=43123\nGATEWAY_LABEL=local\n');
+      writeFileSync(
+        environmentFile,
+        'NODE_ENV=test\nPORT=43123\nAUTH_SERVICE_URL=http://auth.internal.test\nCATALOG_SERVICE_URL=http://catalog.internal.test\nGATEWAY_LABEL=local\n',
+      );
 
       expect(loadEnvironment(environment, environmentFile)).toEqual({
         NODE_ENV: 'production',
         PORT: 43124,
+        AUTH_SERVICE_URL: 'http://shell-auth.internal.test',
+        CATALOG_SERVICE_URL: 'http://shell-catalog.internal.test',
       });
       expect(environment.GATEWAY_LABEL).toBe('local');
     } finally {

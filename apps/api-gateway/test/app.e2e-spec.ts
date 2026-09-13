@@ -7,8 +7,12 @@ import { configureHttpApp, configureSwagger } from '../src/main';
 
 describe('API gateway HTTP boundary', () => {
   let app: NestExpressApplication;
+  const originalAuthServiceUrl = process.env.AUTH_SERVICE_URL;
+  const originalCatalogServiceUrl = process.env.CATALOG_SERVICE_URL;
 
   beforeAll(async () => {
+    process.env.AUTH_SERVICE_URL = 'http://auth.internal.test';
+    process.env.CATALOG_SERVICE_URL = 'http://catalog.internal.test';
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -21,6 +25,10 @@ describe('API gateway HTTP boundary', () => {
 
   afterAll(async () => {
     await app.close();
+    if (originalAuthServiceUrl === undefined) delete process.env.AUTH_SERVICE_URL;
+    else process.env.AUTH_SERVICE_URL = originalAuthServiceUrl;
+    if (originalCatalogServiceUrl === undefined) delete process.env.CATALOG_SERVICE_URL;
+    else process.env.CATALOG_SERVICE_URL = originalCatalogServiceUrl;
   });
 
   it('returns the gateway health response with a request ID', async () => {
@@ -45,6 +53,18 @@ describe('API gateway HTTP boundary', () => {
     expect(response.headers['content-type']).toMatch(/text\/html/);
     expect(response.text).toContain('Swagger UI');
     await request(app.getHttpServer()).get('/docs').expect(404);
+  });
+
+  it('documents the public Auth and Catalog proxy routes', async () => {
+    const response = await request(app.getHttpServer()).get('/api/docs-json').expect(200);
+
+    expect(response.body.paths).toEqual(
+      expect.objectContaining({
+        '/api/auth/login': expect.objectContaining({ post: expect.any(Object) }),
+        '/api/products': expect.objectContaining({ get: expect.any(Object) }),
+        '/api/categories': expect.objectContaining({ get: expect.any(Object) }),
+      }),
+    );
   });
 
   it('returns a safe 413 error for an oversized JSON request body', async () => {

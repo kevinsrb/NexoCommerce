@@ -8,6 +8,10 @@ import { requestCompletionLoggingMiddleware } from '../src/common/http/request-c
 import { requestIdMiddleware } from '../src/common/http/request-id.middleware';
 
 it('logs the completed request path without query-carried secrets', async () => {
+  const originalAuthServiceUrl = process.env.AUTH_SERVICE_URL;
+  const originalCatalogServiceUrl = process.env.CATALOG_SERVICE_URL;
+  process.env.AUTH_SERVICE_URL = 'http://auth.internal.test';
+  process.env.CATALOG_SERVICE_URL = 'http://catalog.internal.test';
   const records: unknown[] = [];
   const logger = createLogger('api-gateway', {
     hooks: {
@@ -36,5 +40,9 @@ it('logs the completed request path without query-carried secrets', async () => 
     ]);
   } finally {
     await app.close();
+    if (originalAuthServiceUrl === undefined) delete process.env.AUTH_SERVICE_URL;
+    else process.env.AUTH_SERVICE_URL = originalAuthServiceUrl;
+    if (originalCatalogServiceUrl === undefined) delete process.env.CATALOG_SERVICE_URL;
+    else process.env.CATALOG_SERVICE_URL = originalCatalogServiceUrl;
   }
 });

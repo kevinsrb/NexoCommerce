@@ -17,9 +17,18 @@ export const catalogEnvironmentSchema = baseEnvironmentSchema.extend({
   DATABASE_URL: z.string().url(),
 });
 
+export const gatewayEnvironmentSchema = baseEnvironmentSchema.extend({
+  AUTH_SERVICE_URL: z.string().url(),
+  CATALOG_SERVICE_URL: z.string().url(),
+});
+
+export type GatewayEnvironment = z.infer<typeof gatewayEnvironmentSchema>;
+
 export const parseBaseEnvironment = (environment: NodeJS.ProcessEnv) =>
   baseEnvironmentSchema.parse(environment);
 export const parseAuthEnvironment = (environment: NodeJS.ProcessEnv) =>
   authEnvironmentSchema.parse(environment);
 export const parseCatalogEnvironment = (environment: NodeJS.ProcessEnv) =>
   catalogEnvironmentSchema.parse(environment);
+export const parseGatewayEnvironment = (environment: NodeJS.ProcessEnv): GatewayEnvironment =>
+  gatewayEnvironmentSchema.parse(environment);

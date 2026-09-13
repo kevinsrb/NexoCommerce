@@ -62,7 +62,7 @@ export function ProductStates({ state, products }: ProductStatesProps) {
               Featured essentials
             </h2>
           </div>
-          <p className="max-w-sm text-sm leading-6 text-slate-400">A small local preview while the catalog connection takes shape.</p>
+          <p className="max-w-sm text-sm leading-6 text-slate-400">A current selection from the Nexo catalog.</p>
         </div>
         <div id="states">
           {state === 'ready' ? <ProductGrid products={products} /> : <StateCard {...stateCards[state]} />}

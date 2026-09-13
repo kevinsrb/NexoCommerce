@@ -24,9 +24,7 @@ flowchart LR
   Redis[Redis 7\nInfrastructure available, no Phase 1 consumer]
 ```
 
-The diagram shows the **target public API topology**: browser-facing application traffic goes only to the API Gateway, which is the entry point for Auth and Catalog. Auth and Catalog are never browser-facing APIs in that topology.
-
-The current Phase 1 implementation has not yet activated those Gateway-to-service calls: the Gateway exposes only its own health and Swagger endpoints, and the storefront renders local fixture data. Consequently, there is currently no browser-to-Auth or browser-to-Catalog traffic, but Gateway proxying/aggregation remains a Phase 2 implementation task.
+Browser-facing application traffic goes only to the API Gateway, which is the entry point for Auth and Catalog. The Gateway forwards the existing Auth, Product, and Category HTTP routes to their owning services using internal REST URLs. Auth and Catalog are not browser API entry points; their direct local ports exist for service development and diagnostics only.
 
 ## Stack
 
@@ -42,7 +40,7 @@ The current Phase 1 implementation has not yet activated those Gateway-to-servic
 ```text
 NexoCommerce/
 ├── apps/
-│   ├── api-gateway/       # /api/health and /api/docs; no proxy in Phase 1
+│   ├── api-gateway/       # public /api boundary, health/docs, Auth/Catalog proxy routes
 │   ├── auth-service/      # Auth API and private Prisma schema/migrations
 │   ├── catalog-service/   # Catalog API and private Prisma schema/migrations
 │   └── web/               # Next.js storefront shell
@@ -99,10 +97,10 @@ Copy each example file rather than committing a real `.env` file. The validation
 | Location | Variables | Purpose/default |
 | --- | --- | --- |
 | `.env` | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`, `REDIS_PORT` | Compose credentials and host ports. Defaults in `.env.example`: `nexo`, `nexo_local_password`, `5432`, `6379`. |
-| `apps/api-gateway/.env` | `NODE_ENV`, `PORT` | Gateway runtime; `PORT=3003`. `NODE_ENV` accepts `development`, `test`, or `production`. |
+| `apps/api-gateway/.env` | `NODE_ENV`, `PORT`, `AUTH_SERVICE_URL`, `CATALOG_SERVICE_URL` | Gateway runtime; `PORT=3003`. The service URLs are required internal REST origins (the local examples use the Auth and Catalog ports). `NODE_ENV` accepts `development`, `test`, or `production`. |
 | `apps/auth-service/.env` | `NODE_ENV`, `PORT`, `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_ACCESS_TTL_SECONDS`, `JWT_REFRESH_TTL_SECONDS` | Auth runtime; `PORT=3001`, PostgreSQL `auth_db`, and TTL defaults of 900/604800 seconds. JWT secrets must be at least 32 characters and different. |
 | `apps/catalog-service/.env` | `NODE_ENV`, `PORT`, `DATABASE_URL` | Catalog runtime; `PORT=3002` and PostgreSQL `catalog_db`. |
-| `apps/web/.env` | `NEXT_PUBLIC_CATALOG_API_URL` | Reserved browser-safe configuration. The current storefront does not consume it. Before it is used, it must point to the Gateway's public API rather than directly to Catalog; the unconsumed `http://localhost:3001` example is a local placeholder, not the target route. |
+| `apps/web/.env` | `NEXT_PUBLIC_API_GATEWAY_URL` | Required public browser API origin; the local example is `http://localhost:3003/api`. The storefront uses it for Catalog data and does not know a Catalog Service URL. |
 
 Normal Gateway starts load the `.env` in its application directory with `dotenv`; Auth and Catalog use `dotenv/config` for the same app-local behavior. Prisma operations need `DATABASE_URL` too. The root alias commands below run Prisma from the relevant service and read that service’s `.env`; use the explicit environment setup only when validating a schema directly from the root:
 
@@ -156,12 +154,12 @@ pnpm --filter @nexo/catalog-service lint
 
 | Service | Owns | Phase 1 routes |
 | --- | --- | --- |
-| API gateway | Target public entry point; no service persistence | `GET /api/health`, Swagger at `/api/docs`; Auth/Catalog routing is deferred |
-| Auth service | `auth_db`, `User`, and `RefreshToken` data | `GET /health`, `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `GET /auth/me` |
-| Catalog service | `catalog_db`, `Category`, `Product`, and `ProductVariant` data | `GET /health`, `GET /products`, `GET /products/:slug`, `GET /categories`, `POST /categories`, `POST /products`, `PATCH /products/:id` |
-| Web | Presentation-only storefront with local featured-product data | Home page; loading, empty, error, and ready presentation states |
+| API gateway | Public HTTP entry point; no service persistence | `GET /api/health`, Swagger at `/api/docs`, `/api/auth/*`, `/api/products/*`, and `/api/categories` |
+| Auth service | `auth_db`, `User`, and `RefreshToken` data | Internal target for Gateway: `GET /health`, `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `GET /auth/me` |
+| Catalog service | `catalog_db`, `Category`, `Product`, and `ProductVariant` data | Internal target for Gateway: `GET /health`, `GET /products`, `GET /products/:slug`, `GET /categories`, `POST /categories`, `POST /products`, `PATCH /products/:id` |
+| Web | Storefront presentation and public Gateway client | Home page; loading, empty, error, and ready product states from `GET /api/products` |
 
-All backends use NestJS with Express. They apply Helmet, permissive CORS without credentials, global DTO validation (`whitelist`, transformation, and rejection of unknown properties), request IDs, structured completion logging, and public error envelopes shaped as `{ statusCode, code, message, requestId }`. Runtime errors do not expose database details or stack traces. Auth hashes passwords and refresh tokens with Argon2; its access and refresh JWTs use separate secrets.
+All backends use NestJS with Express. They apply Helmet, global DTO validation (`whitelist`, transformation, and rejection of unknown properties), request IDs, structured completion logging, and public error envelopes shaped as `{ statusCode, code, message, requestId }`. The Gateway alone enables browser CORS and forwards the request ID, `Authorization`, `Accept`, `Content-Type`, method, query string, and JSON body to its internal targets. An unavailable internal service becomes a Gateway `503 SERVICE_UNAVAILABLE` envelope without target details. Runtime errors do not expose database details or stack traces. Auth hashes passwords and refresh tokens with Argon2; its access and refresh JWTs use separate secrets.
 
 Catalog's `POST /categories`, `POST /products`, and `PATCH /products/:id` are intentionally **unauthenticated temporary administration endpoints** in Phase 1. They must receive authorization before public production administration is enabled.
 
@@ -174,18 +172,16 @@ Catalog's `POST /categories`, `POST /products`, and `PATCH /products/:id` are in
 
 ## Phase 1 limits
 
-Phase 1 intentionally excludes cart, orders, checkout/payments, notifications/messaging, dynamic gateway proxying, service-to-service authorization, catalog data in the storefront, Redis consumption, Kubernetes, Terraform, and production deployment. PostgreSQL database separation is logical: both databases run in the same local Compose PostgreSQL instance for development, while schemas, migrations, generated clients, and persistence code remain private to their owner services.
+Phase 1 intentionally excludes cart, orders, checkout/payments, notifications/messaging, service-to-service authorization, Redis consumption, Kubernetes, Terraform, and production deployment. PostgreSQL database separation is logical: both databases run in the same local Compose PostgreSQL instance for development, while schemas, migrations, generated clients, and persistence code remain private to their owner services.
 
 ## Roadmap
 
-1. **Phase 1 — Foundation:** this monorepo, local infrastructure, independent Auth/Catalog ownership, gateway health/docs, and a static storefront shell.
-2. **Phase 2 — Service integration:** define gateway routing and make browser-facing Catalog reads use the chosen boundary.
-3. **Phase 3 — Storefront data:** replace local featured-product fixtures with catalog-backed browsing and resilient client states.
-4. **Phase 4 — Authorization:** introduce authenticated, role-controlled catalog administration and service-boundary authorization.
-5. **Phase 5 — Cart and checkout:** model cart ownership and the checkout flow.
-6. **Phase 6 — Orders and payments:** add order lifecycle and payment-provider integration.
-7. **Phase 7 — Asynchronous capabilities:** add notifications, background work, and the needed messaging/Redis use cases.
-8. **Phase 8 — Operations:** add observability, deployment automation, Kubernetes/Terraform where justified, and production hardening.
-9. **Phase 9 — Scale and resilience:** evolve performance, reliability, security review, and multi-service operational practices from production evidence.
+1. **Phase 1 — Foundation and integration:** this monorepo, local infrastructure, independent Auth/Catalog ownership, the Gateway public boundary, and catalog-backed storefront browsing.
+2. **Phase 2 — Authorization:** introduce authenticated, role-controlled catalog administration and service-boundary authorization.
+3. **Phase 3 — Cart and checkout:** model cart ownership and the checkout flow.
+4. **Phase 4 — Orders and payments:** add order lifecycle and payment-provider integration.
+5. **Phase 5 — Asynchronous capabilities:** add notifications, background work, and the needed messaging/Redis use cases.
+6. **Phase 6 — Operations:** add observability, deployment automation, Kubernetes/Terraform where justified, and production hardening.
+7. **Phase 7 — Scale and resilience:** evolve performance, reliability, security review, and multi-service operational practices from production evidence.
 
 See [docs/architecture/phase-1.md](docs/architecture/phase-1.md) for the detailed Phase 1 boundary.

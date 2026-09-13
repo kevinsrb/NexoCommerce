@@ -322,7 +322,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     expect(prisma.product.create).not.toHaveBeenCalled();
   });
 
-  it('serves liveness, security headers, CORS, and request correlation without database access', async () => {
+  it('serves internal liveness with security headers and request correlation without database access', async () => {
     const response = await request(app.getHttpServer())
       .get('/health')
       .set('x-request-id', productId)
@@ -331,7 +331,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     expect(response.body).toEqual({ status: 'ok', service: 'catalog-service' });
     expect(response.headers['x-request-id']).toBe(productId);
     expect(response.headers['x-content-type-options']).toBe('nosniff');
-    expect(response.headers['access-control-allow-origin']).toBe('*');
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
     const invalid = await request(app.getHttpServer())
       .get('/health')
       .set('x-request-id', 'unsafe-request-id')

@@ -90,7 +90,6 @@ export const configureHttpApp = (app: NestExpressApplication): void => {
     next();
   });
   app.use(helmet());
-  app.enableCors();
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
   );
