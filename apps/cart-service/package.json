@@ -1,0 +1,42 @@
+{
+  "name": "@nexo/cart-service",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "start:dev": "ts-node src/main.ts",
+    "dev": "ts-node src/main.ts",
+    "lint": "eslint src test",
+    "test": "jest --runInBand",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.2.3",
+    "@nestjs/core": "11.2.3",
+    "@nestjs/jwt": "11.0.0",
+    "@nestjs/passport": "11.0.5",
+    "@nestjs/platform-express": "11.2.3",
+    "@nexo/config": "workspace:*",
+    "@nexo/contracts": "workspace:*",
+    "@nexo/logger": "workspace:*",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.14.1",
+    "decimal.js": "10.6.0",
+    "dotenv": "16.6.1",
+    "helmet": "8.3.0",
+    "passport": "0.7.0",
+    "passport-jwt": "4.0.1",
+    "redis": "4.7.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "11.2.3",
+    "@types/express": "5.0.1",
+    "@types/passport-jwt": "4.0.1",
+    "@types/supertest": "6.0.2",
+    "supertest": "7.2.2",
+    "ts-node": "10.9.2"
+  }
+}

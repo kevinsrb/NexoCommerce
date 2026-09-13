@@ -22,6 +22,12 @@ export const gatewayEnvironmentSchema = baseEnvironmentSchema.extend({
   CATALOG_SERVICE_URL: z.string().url(),
 });
 
+export const cartEnvironmentSchema = baseEnvironmentSchema.extend({
+  REDIS_URL: z.string().url(),
+  CATALOG_SERVICE_URL: z.string().url(),
+  JWT_ACCESS_SECRET: z.string().min(32),
+});
+
 export type GatewayEnvironment = z.infer<typeof gatewayEnvironmentSchema>;
 
 export const parseBaseEnvironment = (environment: NodeJS.ProcessEnv) =>
@@ -32,3 +38,5 @@ export const parseCatalogEnvironment = (environment: NodeJS.ProcessEnv) =>
   catalogEnvironmentSchema.parse(environment);
 export const parseGatewayEnvironment = (environment: NodeJS.ProcessEnv): GatewayEnvironment =>
   gatewayEnvironmentSchema.parse(environment);
+export const parseCartEnvironment = (environment: NodeJS.ProcessEnv) =>
+  cartEnvironmentSchema.parse(environment);
