@@ -40,7 +40,12 @@ export class CartRepository implements OnApplicationBootstrap, OnApplicationShut
   }
 
   async saveCart(userId: string, cart: PersistedCart): Promise<void> {
-    await this.redis.set(this.key(userId), JSON.stringify(cart), { EX: CART_TTL_SECONDS });
+    const persisted: PersistedCart = {
+      currency: cart.currency,
+      items: cart.items.map(({ variantId, quantity }) => ({ variantId, quantity })),
+      updatedAt: cart.updatedAt,
+    };
+    await this.redis.set(this.key(userId), JSON.stringify(persisted), { EX: CART_TTL_SECONDS });
   }
 
   async deleteCart(userId: string): Promise<void> {

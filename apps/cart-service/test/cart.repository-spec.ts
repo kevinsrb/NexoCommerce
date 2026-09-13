@@ -45,6 +45,21 @@ describe('CartRepository', () => {
     );
   });
 
+  it('drops extra cart and item properties before persistence', async () => {
+    await repository.saveCart(userId, {
+      currency: 'USD',
+      items: [{ variantId: 'variant-1', quantity: 2, price: '9.99' }],
+      updatedAt: '2026-09-13T00:00:00.000Z',
+      total: '19.98',
+    } as never);
+
+    expect(redis.set).toHaveBeenCalledWith(
+      `cart:${userId}`,
+      '{"currency":"USD","items":[{"variantId":"variant-1","quantity":2}],"updatedAt":"2026-09-13T00:00:00.000Z"}',
+      { EX: 2_592_000 },
+    );
+  });
+
   it('deletes the cart key idempotently', async () => {
     redis.del.mockResolvedValue(0);
 
