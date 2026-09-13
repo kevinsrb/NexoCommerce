@@ -6,22 +6,27 @@ Nexo Commerce is a TypeScript monorepo for an evolving commerce platform. Phase 
 
 ```mermaid
 flowchart LR
-  Browser[Browser] --> Web[apps/web\nNext.js]
-  Browser --> Gateway[apps/api-gateway\nNestJS + Express]
-  Browser --> Auth[apps/auth-service\nNestJS + Express]
-  Browser --> Catalog[apps/catalog-service\nNestJS + Express]
+  Client[Browser / apps/web frontend\nNext.js] -->|public API| Gateway[apps/api-gateway\nNestJS + Express]
+  Gateway -->|internal service calls| Auth[apps/auth-service\nNestJS + Express]
+  Gateway -->|internal service calls| Catalog[apps/catalog-service\nNestJS + Express]
 
   Gateway --> Shared[packages/contracts\npackages/config\npackages/logger]
   Auth --> Shared
   Catalog --> Shared
-  Auth --> AuthDB[(auth_db)]
-  Catalog --> CatalogDB[(catalog_db)]
-  Postgres[(PostgreSQL 16)] --> AuthDB
-  Postgres --> CatalogDB
-  Redis[(Redis 7)]
+
+  subgraph Postgres[PostgreSQL 16 container]
+    AuthDB[(auth_db)]
+    CatalogDB[(catalog_db)]
+  end
+
+  Auth --> AuthDB
+  Catalog --> CatalogDB
+  Redis[Redis 7\nInfrastructure available, no Phase 1 consumer]
 ```
 
-The gateway currently exposes only its own health and Swagger endpoints; it does **not** proxy Auth or Catalog yet. The storefront is a local-data shell and does not make Catalog calls. This separation is deliberate while gateway routing and browser-facing integration are still being designed.
+The diagram shows the **target public API topology**: browser-facing application traffic goes only to the API Gateway, which is the entry point for Auth and Catalog. Auth and Catalog are never browser-facing APIs in that topology.
+
+The current Phase 1 implementation has not yet activated those Gateway-to-service calls: the Gateway exposes only its own health and Swagger endpoints, and the storefront renders local fixture data. Consequently, there is currently no browser-to-Auth or browser-to-Catalog traffic, but Gateway proxying/aggregation remains a Phase 2 implementation task.
 
 ## Stack
 
@@ -82,8 +87,8 @@ After startup, the local addresses are:
 - Storefront: `http://localhost:3000`
 - API gateway health: `http://localhost:3003/api/health`
 - API gateway Swagger UI: `http://localhost:3003/api/docs`
-- Auth health: `http://localhost:3001/health`
-- Catalog health: `http://localhost:3002/health`
+- Auth health (direct local diagnostic only; not a browser API entry point): `http://localhost:3001/health`
+- Catalog health (direct local diagnostic only; not a browser API entry point): `http://localhost:3002/health`
 
 The health endpoints are liveness checks and intentionally do not query PostgreSQL. A successful health response is not evidence that migrations have been applied or that a live database operation has succeeded.
 
@@ -97,7 +102,7 @@ Copy each example file rather than committing a real `.env` file. The validation
 | `apps/api-gateway/.env` | `NODE_ENV`, `PORT` | Gateway runtime; `PORT=3003`. `NODE_ENV` accepts `development`, `test`, or `production`. |
 | `apps/auth-service/.env` | `NODE_ENV`, `PORT`, `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_ACCESS_TTL_SECONDS`, `JWT_REFRESH_TTL_SECONDS` | Auth runtime; `PORT=3001`, PostgreSQL `auth_db`, and TTL defaults of 900/604800 seconds. JWT secrets must be at least 32 characters and different. |
 | `apps/catalog-service/.env` | `NODE_ENV`, `PORT`, `DATABASE_URL` | Catalog runtime; `PORT=3002` and PostgreSQL `catalog_db`. |
-| `apps/web/.env` | `NEXT_PUBLIC_CATALOG_API_URL` | Reserved browser-safe configuration. The current storefront does not consume it; the example value is `http://localhost:3001`. |
+| `apps/web/.env` | `NEXT_PUBLIC_CATALOG_API_URL` | Reserved browser-safe configuration. The current storefront does not consume it. Before it is used, it must point to the Gateway's public API rather than directly to Catalog; the unconsumed `http://localhost:3001` example is a local placeholder, not the target route. |
 
 Normal Gateway starts load the `.env` in its application directory with `dotenv`; Auth and Catalog use `dotenv/config` for the same app-local behavior. Prisma operations need `DATABASE_URL` too. The root alias commands below run Prisma from the relevant service and read that service’s `.env`; use the explicit environment setup only when validating a schema directly from the root:
 
@@ -151,7 +156,7 @@ pnpm --filter @nexo/catalog-service lint
 
 | Service | Owns | Phase 1 routes |
 | --- | --- | --- |
-| API gateway | HTTP boundary only; no service persistence | `GET /api/health`, Swagger at `/api/docs` |
+| API gateway | Target public entry point; no service persistence | `GET /api/health`, Swagger at `/api/docs`; Auth/Catalog routing is deferred |
 | Auth service | `auth_db`, `User`, and `RefreshToken` data | `GET /health`, `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `GET /auth/me` |
 | Catalog service | `catalog_db`, `Category`, `Product`, and `ProductVariant` data | `GET /health`, `GET /products`, `GET /products/:slug`, `GET /categories`, `POST /categories`, `POST /products`, `PATCH /products/:id` |
 | Web | Presentation-only storefront with local featured-product data | Home page; loading, empty, error, and ready presentation states |

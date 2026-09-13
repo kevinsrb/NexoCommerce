@@ -2,27 +2,34 @@
 
 ## Purpose
 
-Phase 1 provides the smallest independently runnable Nexo Commerce platform foundation. It establishes a strict TypeScript workspace, local infrastructure, explicit service ownership, safe HTTP conventions, and a storefront shell without deciding future gateway routing or service-integration protocols.
+Phase 1 provides the smallest independently runnable Nexo Commerce platform foundation. It establishes a strict TypeScript workspace, local infrastructure, explicit service ownership, safe HTTP conventions, and a storefront shell. Its target public topology places the API Gateway between the browser-facing frontend and the domain services; the concrete Gateway routing protocol remains deferred.
 
 ## Components
 
 ```mermaid
-flowchart TB
-  Web[Next.js storefront\napps/web] -->|future integration seam| Gateway[API gateway\nNestJS + Express]
-  Gateway -->|Phase 1: no proxy| Boundary[Integration boundary module]
-  Auth[Auth service\nNestJS + Express] --> AuthDB[(auth_db)]
-  Catalog[Catalog service\nNestJS + Express] --> CatalogDB[(catalog_db)]
-  PG[PostgreSQL 16 container] --> AuthDB
-  PG --> CatalogDB
-  Redis[Redis 7 container\nprovisioned, unused]
+flowchart LR
+  Client[Browser / apps/web frontend\nNext.js] -->|public API| Gateway[API gateway\nNestJS + Express]
+  Gateway -->|internal service calls| Auth[Auth service\nNestJS + Express]
+  Gateway -->|internal service calls| Catalog[Catalog service\nNestJS + Express]
+
+  subgraph PG[PostgreSQL 16 container]
+    AuthDB[(auth_db)]
+    CatalogDB[(catalog_db)]
+  end
+
+  Auth --> AuthDB
+  Catalog --> CatalogDB
+  Redis[Redis 7 container\ninfrastructure available, no Phase 1 consumer]
   Gateway --> Shared[contracts/config/logger]
   Auth --> Shared
   Catalog --> Shared
 ```
 
-`apps/web` is a Next.js App Router presentation shell. Its displayed products are local fixtures; the `NEXT_PUBLIC_CATALOG_API_URL` example is reserved for later browser-safe configuration and is not consumed in this phase.
+The diagram describes the **target public API topology**. Browser-facing application traffic reaches Auth and Catalog only through the API Gateway; neither microservice is a browser-facing API in that topology.
 
-`apps/api-gateway` uses the `/api` prefix and provides `GET /api/health` plus Swagger at `/api/docs`. Its integration boundary module is intentionally empty: it does not proxy or aggregate Auth/Catalog traffic in Phase 1.
+`apps/web` is a Next.js App Router presentation shell. Its displayed products are local fixtures, so it currently makes no Catalog or Auth call. `NEXT_PUBLIC_CATALOG_API_URL` is reserved for later browser-safe configuration and, before it is consumed, must be configured to use the Gateway's public API rather than a microservice URL.
+
+`apps/api-gateway` uses the `/api` prefix and provides `GET /api/health` plus Swagger at `/api/docs`. Its integration boundary module is intentionally empty in the current implementation: it does not yet proxy or aggregate Auth/Catalog traffic. That missing routing is an implementation gap against the target topology, not a direct browser-to-microservice design.
 
 `apps/auth-service` owns registrations, logins, refresh-token rotation, and authenticated identity lookup. `apps/catalog-service` owns category/product/variant reads and writes. These applications are independently startable NestJS applications using the Express platform adapter.
 
