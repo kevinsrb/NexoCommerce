@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from 
 import {
   CreateCategoryDto,
   CreateProductDto,
+  BatchVariantsDto,
   ListProductsDto,
   UpdateProductDto,
 } from './catalog.dto';
@@ -24,6 +25,11 @@ export class CatalogController {
   @Get('categories')
   listCategories() {
     return this.catalog.listCategories();
+  }
+
+  @Post('internal/variants/batch')
+  getInternalVariants(@Body() dto: BatchVariantsDto) {
+    return this.catalog.getInternalVariants(dto.ids);
   }
 
   // Temporary Phase 1 administration: distributed authorization is deferred.

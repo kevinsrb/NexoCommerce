@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsInt,
@@ -128,4 +129,13 @@ export class ListProductsDto {
   @Min(0)
   @Max(2147483647)
   offset = 0;
+}
+
+export class BatchVariantsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  ids!: string[];
 }

@@ -11,6 +11,9 @@ import { PrismaService } from '../src/prisma/prisma.service';
 const productId = '550e8400-e29b-41d4-a716-446655440000';
 const categoryId = '550e8400-e29b-41d4-a716-446655440001';
 const variantId = '550e8400-e29b-41d4-a716-446655440002';
+const inactiveProductVariantId = '550e8400-e29b-41d4-a716-446655440003';
+const inactiveVariantId = '550e8400-e29b-41d4-a716-446655440004';
+const unknownVariantId = '550e8400-e29b-41d4-a716-446655440005';
 const timestamp = new Date('2026-09-07T00:00:00Z');
 const category = {
   id: categoryId,
@@ -71,11 +74,48 @@ const publicProduct = {
     },
   ],
 };
+const internalVariants = [
+  {
+    id: variantId,
+    productId,
+    name: '250 grams',
+    price: new Prisma.Decimal('1234567890123456.78'),
+    currency: 'COP',
+    stock: 12,
+    active: true,
+    product: { id: productId, name: 'Roasted coffee', active: true },
+  },
+  {
+    id: inactiveProductVariantId,
+    productId: '550e8400-e29b-41d4-a716-446655440006',
+    name: 'Inactive product variant',
+    price: new Prisma.Decimal('9.50'),
+    currency: 'COP',
+    stock: 3,
+    active: true,
+    product: {
+      id: '550e8400-e29b-41d4-a716-446655440006',
+      name: 'Unavailable coffee',
+      active: false,
+    },
+  },
+  {
+    id: inactiveVariantId,
+    productId,
+    name: 'Inactive variant',
+    price: new Prisma.Decimal('11.00'),
+    currency: 'COP',
+    stock: 0,
+    active: false,
+    product: { id: productId, name: 'Roasted coffee', active: true },
+  },
+];
 
 describe('Catalog HTTP through the real service, only Prisma mocked', () => {
   let app: NestExpressApplication;
   const prisma = {
     product: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+    productVariant: { findMany: jest.fn() },
     category: { create: jest.fn(), findMany: jest.fn() },
   };
 
@@ -199,6 +239,66 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     expect((await request(app.getHttpServer()).get('/categories').expect(200)).body).toEqual([
       { id: categoryId, name: 'Coffee', slug: 'coffee' },
     ]);
+  });
+
+  it('returns the narrow current state for active and inactive requested variants', async () => {
+    const ids = [variantId, inactiveProductVariantId, inactiveVariantId, unknownVariantId];
+    prisma.productVariant.findMany.mockResolvedValue(internalVariants);
+
+    const response = await request(app.getHttpServer())
+      .post('/internal/variants/batch')
+      .send({ ids })
+      .expect(201);
+
+    expect(response.body).toEqual([
+      {
+        id: variantId,
+        productId,
+        productName: 'Roasted coffee',
+        variantName: '250 grams',
+        price: '1234567890123456.78',
+        currency: 'COP',
+        stock: 12,
+        productActive: true,
+        variantActive: true,
+      },
+      {
+        id: inactiveProductVariantId,
+        productId: '550e8400-e29b-41d4-a716-446655440006',
+        productName: 'Unavailable coffee',
+        variantName: 'Inactive product variant',
+        price: '9.50',
+        currency: 'COP',
+        stock: 3,
+        productActive: false,
+        variantActive: true,
+      },
+      {
+        id: inactiveVariantId,
+        productId,
+        productName: 'Roasted coffee',
+        variantName: 'Inactive variant',
+        price: '11.00',
+        currency: 'COP',
+        stock: 0,
+        productActive: true,
+        variantActive: false,
+      },
+    ]);
+    expect(prisma.productVariant.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ids } },
+      include: { product: true },
+    });
+  });
+
+  it.each([
+    { ids: ['not-a-uuid'] },
+    { ids: [variantId, variantId] },
+    { ids: Array.from({ length: 101 }, () => variantId) },
+    { ids: variantId },
+  ])('rejects invalid internal variant batches before persistence: %j', async (body) => {
+    await request(app.getHttpServer()).post('/internal/variants/batch').send(body).expect(400);
+    expect(prisma.productVariant.findMany).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -1,9 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { type InternalCatalogVariant } from '@nexo/contracts';
 import { Prisma, type Category } from '../../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateCategoryDto,
   CreateProductDto,
+  BatchVariantsDto,
   CreateVariantDto,
   ListProductsDto,
   UpdateProductDto,
@@ -17,8 +19,12 @@ const publicInclude = {
   ...include,
   variants: { ...include.variants, where: { active: true } },
 } satisfies Prisma.ProductInclude;
+const internalVariantInclude = { product: true } satisfies Prisma.ProductVariantInclude;
 
 type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof include }>;
+type InternalVariantWithProduct = Prisma.ProductVariantGetPayload<{
+  include: typeof internalVariantInclude;
+}>;
 const presentCategory = (category: Category) => ({
   id: category.id,
   name: category.name,
@@ -40,6 +46,17 @@ const presentProduct = (product: ProductWithRelations) => ({
     stock: variant.stock,
     active: variant.active,
   })),
+});
+const presentInternalVariant = (variant: InternalVariantWithProduct): InternalCatalogVariant => ({
+  id: variant.id,
+  productId: variant.productId,
+  productName: variant.product.name,
+  variantName: variant.name,
+  price: variant.price.toFixed(2),
+  currency: variant.currency,
+  stock: variant.stock,
+  productActive: variant.product.active,
+  variantActive: variant.active,
 });
 const variantData = (
   variant: CreateVariantDto,
@@ -106,6 +123,14 @@ export class CatalogService {
       orderBy: { slug: 'asc' },
     });
     return products.map(presentProduct);
+  }
+
+  async getInternalVariants(ids: BatchVariantsDto['ids']): Promise<InternalCatalogVariant[]> {
+    const variants = await this.prisma.productVariant.findMany({
+      where: { id: { in: ids } },
+      include: internalVariantInclude,
+    });
+    return variants.map(presentInternalVariant);
   }
 
   async createCategory(dto: CreateCategoryDto) {
