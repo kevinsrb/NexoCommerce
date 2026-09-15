@@ -106,7 +106,9 @@ export class CartHarness {
         return;
       }
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify(this.variants.filter((variant) => ids.includes(variant.id))));
+      // PostgreSQL UUID lookup accepts alternate casing and returns canonical lowercase IDs.
+      const canonicalIds = ids.map((id) => id.toLowerCase());
+      res.end(JSON.stringify(this.variants.filter((variant) => canonicalIds.includes(variant.id))));
     });
     await new Promise<void>((resolve) => this.server.listen(0, '127.0.0.1', resolve));
     const fixture = await Test.createTestingModule({ imports: [AppModule] })

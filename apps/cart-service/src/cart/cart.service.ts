@@ -32,6 +32,7 @@ export class CartService {
     quantity: number,
     requestId: string,
   ): Promise<CartResponse> {
+    variantId = variantId.toLowerCase();
     const cart = await this.repository.getCart(userId);
     const items = cart?.items.map((item) => ({ ...item })) ?? [];
     const existing = items.find((item) => item.variantId === variantId);
@@ -48,6 +49,7 @@ export class CartService {
     quantity: number,
     requestId: string,
   ): Promise<CartResponse> {
+    variantId = variantId.toLowerCase();
     const cart = await this.repository.getCart(userId);
     if (!cart?.items.some((item) => item.variantId === variantId)) {
       throw new CartDomainException('CART_ITEM_NOT_FOUND', 'Cart item not found', 404);
@@ -59,6 +61,7 @@ export class CartService {
   }
 
   async removeItem(userId: string, variantId: string): Promise<void> {
+    variantId = variantId.toLowerCase();
     const cart = await this.repository.getCart(userId);
     if (!cart) return;
     const items = cart.items.filter((item) => item.variantId !== variantId);

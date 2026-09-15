@@ -94,6 +94,32 @@ describe('Cart domain through real service, repository and HTTP', () => {
     expect(h.calls.map((call) => call.ids)).toEqual([[variantId], [variantId]]);
   });
 
+  it('treats uppercase and lowercase POST variant UUIDs as one canonical line', async () => {
+    await add(variantId.toUpperCase(), 2).expect(201);
+    const response = await add(variantId, 3).expect(201);
+    expect(response.body.items).toHaveLength(1);
+    expect(response.body.items[0]).toMatchObject({ variantId, quantity: 5 });
+    expect(h.stored()).toMatchObject({ items: [{ variantId, quantity: 5 }] });
+    expect(h.calls.map((call) => call.ids)).toEqual([[variantId], [variantId]]);
+  });
+
+  it('updates an existing line using an uppercase PATCH variant UUID', async () => {
+    await add(variantId, 2).expect(201);
+    const response = await patch(variantId.toUpperCase(), 4).expect(200);
+    expect(response.body.items).toHaveLength(1);
+    expect(response.body.items[0]).toMatchObject({ variantId, quantity: 4 });
+    expect(h.stored()).toMatchObject({ items: [{ variantId, quantity: 4 }] });
+    expect(h.calls.map((call) => call.ids)).toEqual([[variantId], [variantId]]);
+  });
+
+  it('removes an existing line using an uppercase DELETE variant UUID', async () => {
+    await add(variantId, 2).expect(201);
+    await remove(variantId.toUpperCase()).expect(204);
+    expect(h.stored()).toBeNull();
+    expect((await get().expect(200)).body).toEqual(emptyCart);
+    expect(h.calls).toHaveLength(1);
+  });
+
   it.each([
     { field: 'missing', code: 'VARIANT_NOT_FOUND', status: 404 },
     { field: 'productActive', code: 'PRODUCT_INACTIVE', status: 409 },
