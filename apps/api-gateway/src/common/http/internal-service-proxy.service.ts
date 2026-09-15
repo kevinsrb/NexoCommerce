@@ -25,9 +25,11 @@ export class InternalServiceProxy {
     try {
       const upstream = await this.requestUpstream(request, service);
       const contentType = upstream.headers.get('content-type');
+      const body = Buffer.from(await upstream.arrayBuffer());
+      if (this.isJsonContentType(contentType)) JSON.parse(body.toString('utf8'));
       if (contentType) response.setHeader('content-type', contentType);
 
-      response.status(upstream.status).send(Buffer.from(await upstream.arrayBuffer()));
+      response.status(upstream.status).send(body);
     } catch {
       throw new ServiceUnavailableException('Internal service unavailable');
     }
@@ -59,5 +61,9 @@ export class InternalServiceProxy {
           : this.environment.CART_SERVICE_URL;
     const internalPath = request.originalUrl.replace(/^\/api(?=\/|$)/, '');
     return new URL(internalPath, serviceUrl);
+  }
+
+  private isJsonContentType(contentType: string | null): boolean {
+    return contentType?.split(';', 1)[0].trim().toLowerCase() === 'application/json';
   }
 }

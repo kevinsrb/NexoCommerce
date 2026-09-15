@@ -123,6 +123,16 @@ describe('API Gateway service proxy', () => {
         setTimeout(() => outgoing.destroy(), 25);
         return;
       }
+      if (received.url?.includes('malformed=true')) {
+        outgoing.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        outgoing.end('{"cart":}');
+        return;
+      }
+      if (received.url?.includes('plain=true')) {
+        outgoing.writeHead(201, { 'content-type': 'text/plain; charset=utf-8' });
+        outgoing.end('{"cart":}');
+        return;
+      }
       json(
         outgoing,
         200,
@@ -259,6 +269,25 @@ describe('API Gateway service proxy', () => {
       message: 'Internal service unavailable',
       requestId: response.headers['x-request-id'],
     });
+  });
+
+  it('returns a safe public response when the Cart service sends malformed JSON', async () => {
+    const response = await request(app.getHttpServer()).get('/api/cart?malformed=true').expect(503);
+
+    expect(response.body).toEqual({
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Internal service unavailable',
+      requestId: response.headers['x-request-id'],
+    });
+    expect(response.text).not.toContain('{"cart":}');
+  });
+
+  it('preserves a non-JSON Cart response body without parsing it', async () => {
+    const response = await request(app.getHttpServer()).get('/api/cart?plain=true').expect(201);
+
+    expect(response.headers['content-type']).toMatch(/^text\/plain/);
+    expect(response.text).toBe('{"cart":}');
   });
 
   it('returns a safe public response when the Cart service is unavailable', async () => {

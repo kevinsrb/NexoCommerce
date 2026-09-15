@@ -21,6 +21,35 @@ describe('API gateway environment', () => {
     });
   });
 
+  it('accepts HTTP(S) service origins with an optional port and trailing slash', () => {
+    expect(
+      parseEnvironment({
+        AUTH_SERVICE_URL: 'https://auth.internal.test:8443/',
+        CATALOG_SERVICE_URL: 'http://catalog.internal.test:3002',
+        CART_SERVICE_URL: 'https://cart.internal.test/',
+      }),
+    ).toEqual(expect.objectContaining({
+      AUTH_SERVICE_URL: 'https://auth.internal.test:8443/',
+      CATALOG_SERVICE_URL: 'http://catalog.internal.test:3002',
+      CART_SERVICE_URL: 'https://cart.internal.test/',
+    }));
+  });
+
+  it.each([
+    ['AUTH_SERVICE_URL', 'ftp://auth.internal.test'],
+    ['CATALOG_SERVICE_URL', 'http://catalog.internal.test/internal'],
+    ['CART_SERVICE_URL', 'https://customer:secret@cart.internal.test'],
+    ['AUTH_SERVICE_URL', 'https://auth.internal.test?token=secret'],
+    ['CART_SERVICE_URL', 'https://cart.internal.test#fragment'],
+  ])('rejects a non-origin internal service target: %s=%s', (key, value) => {
+    expect(() => parseEnvironment({
+      AUTH_SERVICE_URL: 'http://auth.internal.test',
+      CATALOG_SERVICE_URL: 'http://catalog.internal.test',
+      CART_SERVICE_URL: 'http://cart.internal.test',
+      [key]: value,
+    })).toThrow();
+  });
+
   it('loads a gateway app-local dotenv file into the runtime environment', () => {
     const directory = mkdtempSync(join(tmpdir(), 'nexo-gateway-environment-'));
     const environment: Record<string, string> = {};
