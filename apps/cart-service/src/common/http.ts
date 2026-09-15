@@ -33,8 +33,18 @@ class HttpExceptionFilter implements ExceptionFilter {
     };
     const body: ApiError = {
       statusCode,
-      code: error instanceof CartDomainException ? error.code : (codes[statusCode] ?? 'INTERNAL_SERVER_ERROR'),
-      message: statusCode >= 500 ? 'Internal server error' : error instanceof HttpException ? error.message : 'Internal server error',
+      code:
+        error instanceof CartDomainException
+          ? error.code
+          : (codes[statusCode] ?? 'INTERNAL_SERVER_ERROR'),
+      message:
+        error instanceof CartDomainException
+          ? error.message
+          : statusCode >= 500
+            ? 'Internal server error'
+            : error instanceof HttpException
+              ? error.message
+              : 'Internal server error',
       requestId: request.requestId ?? 'unknown',
     };
     response.status(statusCode).json(body);
