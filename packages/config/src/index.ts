@@ -20,6 +20,7 @@ export const catalogEnvironmentSchema = baseEnvironmentSchema.extend({
 export const gatewayEnvironmentSchema = baseEnvironmentSchema.extend({
   AUTH_SERVICE_URL: z.string().url(),
   CATALOG_SERVICE_URL: z.string().url(),
+  CART_SERVICE_URL: z.string().url(),
 });
 
 export const cartEnvironmentSchema = baseEnvironmentSchema.extend({

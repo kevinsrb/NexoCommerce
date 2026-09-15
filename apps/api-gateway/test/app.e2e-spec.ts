@@ -9,10 +9,12 @@ describe('API gateway HTTP boundary', () => {
   let app: NestExpressApplication;
   const originalAuthServiceUrl = process.env.AUTH_SERVICE_URL;
   const originalCatalogServiceUrl = process.env.CATALOG_SERVICE_URL;
+  const originalCartServiceUrl = process.env.CART_SERVICE_URL;
 
   beforeAll(async () => {
     process.env.AUTH_SERVICE_URL = 'http://auth.internal.test';
     process.env.CATALOG_SERVICE_URL = 'http://catalog.internal.test';
+    process.env.CART_SERVICE_URL = 'http://cart.internal.test';
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -29,6 +31,8 @@ describe('API gateway HTTP boundary', () => {
     else process.env.AUTH_SERVICE_URL = originalAuthServiceUrl;
     if (originalCatalogServiceUrl === undefined) delete process.env.CATALOG_SERVICE_URL;
     else process.env.CATALOG_SERVICE_URL = originalCatalogServiceUrl;
+    if (originalCartServiceUrl === undefined) delete process.env.CART_SERVICE_URL;
+    else process.env.CART_SERVICE_URL = originalCartServiceUrl;
   });
 
   it('returns the gateway health response with a request ID', async () => {
@@ -55,7 +59,7 @@ describe('API gateway HTTP boundary', () => {
     await request(app.getHttpServer()).get('/docs').expect(404);
   });
 
-  it('documents the public Auth and Catalog proxy routes', async () => {
+  it('documents the public Auth, Catalog, and Cart proxy routes without Catalog internal routes', async () => {
     const response = await request(app.getHttpServer()).get('/api/docs-json').expect(200);
 
     expect(response.body.paths).toEqual(
@@ -63,8 +67,19 @@ describe('API gateway HTTP boundary', () => {
         '/api/auth/login': expect.objectContaining({ post: expect.any(Object) }),
         '/api/products': expect.objectContaining({ get: expect.any(Object) }),
         '/api/categories': expect.objectContaining({ get: expect.any(Object) }),
+        '/api/cart': expect.objectContaining({ get: expect.any(Object), delete: expect.any(Object) }),
+        '/api/cart/items': expect.objectContaining({ post: expect.any(Object) }),
+        '/api/cart/items/{variantId}': expect.objectContaining({
+          patch: expect.any(Object),
+          delete: expect.any(Object),
+        }),
       }),
     );
+    expect(response.body.paths['/api/internal/variants/batch']).toBeUndefined();
+  });
+
+  it('does not route Catalog internal endpoints through the public gateway', async () => {
+    await request(app.getHttpServer()).post('/api/internal/variants/batch').send({}).expect(404);
   });
 
   it('returns a safe 413 error for an oversized JSON request body', async () => {

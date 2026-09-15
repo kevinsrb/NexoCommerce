@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Post, Req, Res } from '@nestjs/common';
+import { Controller, Delete, Get, Patch, Post, Req, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { type Request, type Response } from 'express';
 
@@ -76,6 +76,41 @@ export class InternalServiceProxyController {
   @ApiOperation({ summary: 'Create a category through the Catalog Service' })
   createCategory(@Req() request: Request, @Res() response: Response) {
     return this.forward(request, response, 'catalog');
+  }
+
+  @Get('cart')
+  @ApiTags('Cart')
+  @ApiOperation({ summary: 'Read the authenticated cart through the Cart Service' })
+  getCart(@Req() request: Request, @Res() response: Response) {
+    return this.forward(request, response, 'cart');
+  }
+
+  @Post('cart/items')
+  @ApiTags('Cart')
+  @ApiOperation({ summary: 'Add an item to the authenticated cart through the Cart Service' })
+  addCartItem(@Req() request: Request, @Res() response: Response) {
+    return this.forward(request, response, 'cart');
+  }
+
+  @Patch('cart/items/:variantId')
+  @ApiTags('Cart')
+  @ApiOperation({ summary: 'Update an authenticated cart item through the Cart Service' })
+  updateCartItem(@Req() request: Request, @Res() response: Response) {
+    return this.forward(request, response, 'cart');
+  }
+
+  @Delete('cart/items/:variantId')
+  @ApiTags('Cart')
+  @ApiOperation({ summary: 'Remove an item from the authenticated cart through the Cart Service' })
+  removeCartItem(@Req() request: Request, @Res() response: Response) {
+    return this.forward(request, response, 'cart');
+  }
+
+  @Delete('cart')
+  @ApiTags('Cart')
+  @ApiOperation({ summary: 'Clear the authenticated cart through the Cart Service' })
+  clearCart(@Req() request: Request, @Res() response: Response) {
+    return this.forward(request, response, 'cart');
   }
 
   private forward(request: Request, response: Response, service: InternalService) {

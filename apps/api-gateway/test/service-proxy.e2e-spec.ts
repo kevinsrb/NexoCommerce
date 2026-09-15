@@ -51,17 +51,22 @@ const json = (response: ServerResponse, statusCode: number, body: unknown, reque
 };
 
 describe('API Gateway service proxy', () => {
+  jest.setTimeout(15_000);
   let app: NestExpressApplication;
   let authServer: Server;
   let catalogServer: Server;
+  let cartServer: Server;
   let authRequests: ReceivedRequest[];
   let catalogRequests: ReceivedRequest[];
+  let cartRequests: ReceivedRequest[];
   const originalAuthServiceUrl = process.env.AUTH_SERVICE_URL;
   const originalCatalogServiceUrl = process.env.CATALOG_SERVICE_URL;
+  const originalCartServiceUrl = process.env.CART_SERVICE_URL;
 
   beforeAll(async () => {
     authRequests = [];
     catalogRequests = [];
+    cartRequests = [];
     authServer = createServer(async (incoming, outgoing) => {
       const received = await captureRequest(incoming);
       authRequests.push(received);
@@ -107,9 +112,30 @@ describe('API Gateway service proxy', () => {
           : undefined,
       );
     });
+    cartServer = createServer(async (incoming, outgoing) => {
+      const received = await captureRequest(incoming);
+      cartRequests.push(received);
+      if (received.url?.includes('timeout=true')) return;
+      if (received.url?.includes('truncated=true')) {
+        outgoing.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        outgoing.flushHeaders();
+        outgoing.write('{"partial":');
+        setTimeout(() => outgoing.destroy(), 25);
+        return;
+      }
+      json(
+        outgoing,
+        200,
+        { cart: 'forwarded' },
+        typeof received.headers['x-request-id'] === 'string'
+          ? received.headers['x-request-id']
+          : undefined,
+      );
+    });
 
     process.env.AUTH_SERVICE_URL = await listen(authServer);
     process.env.CATALOG_SERVICE_URL = await listen(catalogServer);
+    process.env.CART_SERVICE_URL = await listen(cartServer);
 
     const moduleFixture = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleFixture.createNestApplication<NestExpressApplication>();
@@ -122,10 +148,13 @@ describe('API Gateway service proxy', () => {
     await app.close();
     if (authServer.listening) await close(authServer);
     if (catalogServer.listening) await close(catalogServer);
+    if (cartServer.listening) await close(cartServer);
     if (originalAuthServiceUrl === undefined) delete process.env.AUTH_SERVICE_URL;
     else process.env.AUTH_SERVICE_URL = originalAuthServiceUrl;
     if (originalCatalogServiceUrl === undefined) delete process.env.CATALOG_SERVICE_URL;
     else process.env.CATALOG_SERVICE_URL = originalCatalogServiceUrl;
+    if (originalCartServiceUrl === undefined) delete process.env.CART_SERVICE_URL;
+    else process.env.CART_SERVICE_URL = originalCartServiceUrl;
   });
 
   it('forwards Auth requests and preserves the inbound request ID', async () => {
@@ -158,6 +187,91 @@ describe('API Gateway service proxy', () => {
     expect(catalogRequests).toEqual([
       expect.objectContaining({ method: 'GET', url: '/products?limit=1&offset=0' }),
     ]);
+  });
+
+  it('routes the five public Cart operations to the Cart service with auth, body, query, and request ID', async () => {
+    const requestId = 'd67633c3-40f3-43e0-b424-4c949222b0ef';
+    const authorization = 'Bearer authenticated-cart-customer';
+    const variantId = '8f894354-5277-47ee-a0ce-57d9b95ed321';
+
+    await request(app.getHttpServer())
+      .get('/api/cart?include=items')
+      .set('authorization', authorization)
+      .set('x-request-id', requestId)
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/api/cart/items?source=product')
+      .set('authorization', authorization)
+      .set('x-request-id', requestId)
+      .set('content-type', 'application/json')
+      .send({ variantId, quantity: 2 })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/cart/items/${variantId}`)
+      .set('authorization', authorization)
+      .set('x-request-id', requestId)
+      .send({ quantity: 3 })
+      .expect(200);
+    await request(app.getHttpServer())
+      .delete(`/api/cart/items/${variantId}`)
+      .set('authorization', authorization)
+      .set('x-request-id', requestId)
+      .expect(200);
+    await request(app.getHttpServer())
+      .delete('/api/cart')
+      .set('authorization', authorization)
+      .set('x-request-id', requestId)
+      .expect(200);
+
+    expect(cartRequests).toEqual([
+      expect.objectContaining({
+        method: 'GET', url: '/cart?include=items',
+        headers: expect.objectContaining({ authorization, 'x-request-id': requestId }),
+      }),
+      expect.objectContaining({
+        method: 'POST', url: '/cart/items?source=product',
+        headers: expect.objectContaining({ authorization, 'content-type': 'application/json', 'x-request-id': requestId }),
+        body: JSON.stringify({ variantId, quantity: 2 }),
+      }),
+      expect.objectContaining({ method: 'PATCH', url: `/cart/items/${variantId}`, body: JSON.stringify({ quantity: 3 }) }),
+      expect.objectContaining({ method: 'DELETE', url: `/cart/items/${variantId}` }),
+      expect.objectContaining({ method: 'DELETE', url: '/cart' }),
+    ]);
+  });
+
+  it('returns a safe public response when the Cart service times out', async () => {
+    const response = await request(app.getHttpServer()).get('/api/cart?timeout=true').expect(503);
+
+    expect(response.body).toEqual({
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Internal service unavailable',
+      requestId: response.headers['x-request-id'],
+    });
+  });
+
+  it('returns a safe public response when a Cart response body is interrupted', async () => {
+    const response = await request(app.getHttpServer()).get('/api/cart?truncated=true').expect(503);
+
+    expect(response.body).toEqual({
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Internal service unavailable',
+      requestId: response.headers['x-request-id'],
+    });
+  });
+
+  it('returns a safe public response when the Cart service is unavailable', async () => {
+    await close(cartServer);
+
+    const response = await request(app.getHttpServer()).get('/api/cart').expect(503);
+
+    expect(response.body).toEqual({
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Internal service unavailable',
+      requestId: response.headers['x-request-id'],
+    });
   });
 
   it('returns a safe public response when an internal response body is interrupted', async () => {

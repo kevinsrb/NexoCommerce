@@ -7,7 +7,7 @@ import {
 } from '../environment';
 import { getRequestId } from './request-id.types';
 
-export type InternalService = 'auth' | 'catalog';
+export type InternalService = 'auth' | 'catalog' | 'cart';
 
 const forwardedHeaders = ['accept', 'authorization', 'content-type'] as const;
 
@@ -54,7 +54,9 @@ export class InternalServiceProxy {
     const serviceUrl =
       service === 'auth'
         ? this.environment.AUTH_SERVICE_URL
-        : this.environment.CATALOG_SERVICE_URL;
+        : service === 'catalog'
+          ? this.environment.CATALOG_SERVICE_URL
+          : this.environment.CART_SERVICE_URL;
     const internalPath = request.originalUrl.replace(/^\/api(?=\/|$)/, '');
     return new URL(internalPath, serviceUrl);
   }

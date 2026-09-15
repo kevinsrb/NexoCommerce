@@ -10,12 +10,14 @@ describe('API gateway environment', () => {
       parseEnvironment({
         AUTH_SERVICE_URL: 'http://auth.internal.test',
         CATALOG_SERVICE_URL: 'http://catalog.internal.test',
+        CART_SERVICE_URL: 'http://cart.internal.test',
       }),
     ).toEqual({
       NODE_ENV: 'development',
       PORT: 3003,
       AUTH_SERVICE_URL: 'http://auth.internal.test',
       CATALOG_SERVICE_URL: 'http://catalog.internal.test',
+      CART_SERVICE_URL: 'http://cart.internal.test',
     });
   });
 
@@ -27,7 +29,7 @@ describe('API gateway environment', () => {
     try {
       writeFileSync(
         environmentFile,
-        'NODE_ENV=test\nPORT=43123\nAUTH_SERVICE_URL=http://auth.internal.test\nCATALOG_SERVICE_URL=http://catalog.internal.test\n',
+        'NODE_ENV=test\nPORT=43123\nAUTH_SERVICE_URL=http://auth.internal.test\nCATALOG_SERVICE_URL=http://catalog.internal.test\nCART_SERVICE_URL=http://cart.internal.test\n',
       );
 
       expect(loadEnvironment(environment, environmentFile)).toEqual({
@@ -35,6 +37,7 @@ describe('API gateway environment', () => {
         PORT: 43123,
         AUTH_SERVICE_URL: 'http://auth.internal.test',
         CATALOG_SERVICE_URL: 'http://catalog.internal.test',
+        CART_SERVICE_URL: 'http://cart.internal.test',
       });
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -48,13 +51,14 @@ describe('API gateway environment', () => {
         PORT: '43124',
         AUTH_SERVICE_URL: 'http://shell-auth.internal.test',
         CATALOG_SERVICE_URL: 'http://shell-catalog.internal.test',
+        CART_SERVICE_URL: 'http://shell-cart.internal.test',
       };
     const environmentFile = join(directory, '.env');
 
     try {
       writeFileSync(
         environmentFile,
-        'NODE_ENV=test\nPORT=43123\nAUTH_SERVICE_URL=http://auth.internal.test\nCATALOG_SERVICE_URL=http://catalog.internal.test\nGATEWAY_LABEL=local\n',
+        'NODE_ENV=test\nPORT=43123\nAUTH_SERVICE_URL=http://auth.internal.test\nCATALOG_SERVICE_URL=http://catalog.internal.test\nCART_SERVICE_URL=http://cart.internal.test\nGATEWAY_LABEL=local\n',
       );
 
       expect(loadEnvironment(environment, environmentFile)).toEqual({
@@ -62,6 +66,7 @@ describe('API gateway environment', () => {
         PORT: 43124,
         AUTH_SERVICE_URL: 'http://shell-auth.internal.test',
         CATALOG_SERVICE_URL: 'http://shell-catalog.internal.test',
+        CART_SERVICE_URL: 'http://shell-cart.internal.test',
       });
       expect(environment.GATEWAY_LABEL).toBe('local');
     } finally {
