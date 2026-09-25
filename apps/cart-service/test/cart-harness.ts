@@ -16,6 +16,7 @@ export const otherId = '550e8400-e29b-41d4-a716-446655440002';
 export const missingId = '550e8400-e29b-41d4-a716-446655440003';
 export const requestId = '550e8400-e29b-41d4-a716-446655440004';
 const secret = 'access-secret-at-least-thirty-two-characters';
+const catalogInternalToken = 'catalog-internal-token-at-least-32-characters';
 export const emptyCart = { currency: null, items: [], total: '0.00', itemCount: 0 };
 
 export class CartHarness {
@@ -67,6 +68,10 @@ export class CartHarness {
       let body = '';
       for await (const chunk of req) body += chunk;
       const { ids } = JSON.parse(body) as { ids: string[] };
+      if (req.headers['x-internal-service-token'] !== catalogInternalToken) {
+        res.writeHead(401).end();
+        return;
+      }
       this.calls.push({
         url: req.url,
         method: req.method,
@@ -118,6 +123,7 @@ export class CartHarness {
           REDIS_URL: 'redis://localhost:6379',
           CATALOG_SERVICE_URL: `http://127.0.0.1:${(this.server.address() as AddressInfo).port}`,
           JWT_ACCESS_SECRET: secret,
+          CATALOG_INTERNAL_TOKEN: catalogInternalToken,
         }),
       )
       .overrideProvider(CART_REDIS_CLIENT)

@@ -5,6 +5,7 @@ describe('Cart environment', () => {
     REDIS_URL: 'redis://localhost:6379',
     CATALOG_SERVICE_URL: 'http://localhost:3002',
     JWT_ACCESS_SECRET: 'a'.repeat(32),
+    CATALOG_INTERNAL_TOKEN: 'b'.repeat(32),
   };
 
   it.each([

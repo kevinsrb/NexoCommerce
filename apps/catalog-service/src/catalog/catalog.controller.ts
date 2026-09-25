@@ -8,6 +8,7 @@ import {
 } from './catalog.dto';
 import { CatalogService } from './catalog.service';
 import { AdminGuard } from '../auth/admin.guard';
+import { CatalogInternalGuard } from '../common/internal-service.guard';
 
 @Controller()
 export class CatalogController {
@@ -29,6 +30,7 @@ export class CatalogController {
   }
 
   @Post('internal/variants/batch')
+  @UseGuards(CatalogInternalGuard)
   getInternalVariants(@Body() dto: BatchVariantsDto) {
     return this.catalog.getInternalVariants(dto.ids);
   }

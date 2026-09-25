@@ -19,6 +19,7 @@ describe('Cart HTTP boundary', () => {
           REDIS_URL: 'redis://localhost:6379',
           CATALOG_SERVICE_URL: 'http://localhost:3002',
           JWT_ACCESS_SECRET: 'access-secret-at-least-thirty-two-characters',
+          CATALOG_INTERNAL_TOKEN: 'catalog-internal-token-at-least-32-characters',
         }),
       )
       .overrideProvider(CartRepository)

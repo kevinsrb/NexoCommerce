@@ -17,6 +17,7 @@ const inactiveVariantId = '550e8400-e29b-41d4-a716-446655440004';
 const unknownVariantId = '550e8400-e29b-41d4-a716-446655440005';
 const timestamp = new Date('2026-09-07T00:00:00Z');
 const accessSecret = 'access-secret-for-catalog-tests-at-least-32-characters';
+const internalToken = 'catalog-internal-token-at-least-32-characters';
 const jwt = new JwtService();
 const token = (role: 'CUSTOMER' | 'ADMIN') =>
   jwt.sign(
@@ -136,6 +137,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
         parseEnvironment({
           DATABASE_URL: 'postgresql://nexo:nexo_local_password@localhost:5432/catalog_db',
           JWT_ACCESS_SECRET: accessSecret,
+          CATALOG_INTERNAL_TOKEN: internalToken,
           NODE_ENV: 'test',
         }),
       )
@@ -282,6 +284,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
 
     const response = await request(app.getHttpServer())
       .post('/internal/variants/batch')
+      .set('x-internal-service-token', internalToken)
       .send({ ids })
       .expect(201);
 
@@ -333,7 +336,18 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     { ids: Array.from({ length: 101 }, () => variantId) },
     { ids: variantId },
   ])('rejects invalid internal variant batches before persistence: %j', async (body) => {
-    await request(app.getHttpServer()).post('/internal/variants/batch').send(body).expect(400);
+    await request(app.getHttpServer())
+      .post('/internal/variants/batch')
+      .set('x-internal-service-token', internalToken)
+      .send(body)
+      .expect(400);
+    expect(prisma.productVariant.findMany).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 'wrong-token'])('rejects internal variant lookup without a valid service token', async (token) => {
+    const builder = request(app.getHttpServer()).post('/internal/variants/batch').send({ ids: [variantId] });
+    if (token) builder.set('x-internal-service-token', token);
+    await builder.expect(401);
     expect(prisma.productVariant.findMany).not.toHaveBeenCalled();
   });
 

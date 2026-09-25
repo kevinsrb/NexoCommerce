@@ -31,6 +31,7 @@ export const authEnvironmentSchema = baseEnvironmentSchema.extend({
 export const catalogEnvironmentSchema = baseEnvironmentSchema.extend({
   DATABASE_URL: z.string().url(),
   JWT_ACCESS_SECRET: z.string().min(32),
+  CATALOG_INTERNAL_TOKEN: z.string().min(32),
 });
 
 export const gatewayEnvironmentSchema = baseEnvironmentSchema.extend({
@@ -43,6 +44,7 @@ export const cartEnvironmentSchema = baseEnvironmentSchema.extend({
   REDIS_URL: z.string().url(),
   CATALOG_SERVICE_URL: internalServiceOrigin,
   JWT_ACCESS_SECRET: z.string().min(32),
+  CATALOG_INTERNAL_TOKEN: z.string().min(32),
 });
 
 export type GatewayEnvironment = z.infer<typeof gatewayEnvironmentSchema>;

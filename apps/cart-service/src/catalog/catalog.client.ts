@@ -38,7 +38,11 @@ export class CatalogClient {
         `${this.environment.CATALOG_SERVICE_URL.replace(/\/$/, '')}/internal/variants/batch`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-request-id': requestId },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-request-id': requestId,
+            'x-internal-service-token': this.environment.CATALOG_INTERNAL_TOKEN,
+          },
           body: JSON.stringify({ ids }),
           signal: AbortSignal.timeout(5000),
         },
