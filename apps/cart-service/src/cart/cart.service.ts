@@ -117,6 +117,8 @@ export class CartService {
       throw new CartDomainException('INSUFFICIENT_STOCK', 'Insufficient stock', 409);
     if (result === -4)
       throw new CartDomainException('CART_ITEM_NOT_FOUND', 'Cart item not found', 404);
+    if (result === -5)
+      throw new BadRequestException('Cart supports at most 100 distinct variants');
     return response;
   }
 

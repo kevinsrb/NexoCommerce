@@ -108,6 +108,7 @@ end
 
 if operation == 'update' and not found then return -4 end
 if operation == 'add' and not found then
+  if #cart.items >= 100 then return -5 end
   if quantity > stock then return -3 end
   table.insert(cart.items, { variantId = variantId, quantity = quantity })
 end

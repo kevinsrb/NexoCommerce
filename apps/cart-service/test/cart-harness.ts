@@ -189,6 +189,7 @@ export class CartHarness {
               if (existing.quantity + quantity > stock) return -3;
               existing.quantity += quantity;
             } else {
+              if (next.items.length >= 100) return -5;
               if (quantity > stock) return -3;
               next.items.push({ variantId, quantity });
             }
