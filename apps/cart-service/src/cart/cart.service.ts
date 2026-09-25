@@ -102,7 +102,7 @@ export class CartService {
       items,
       updatedAt: new Date().toISOString(),
     };
-    const response = this.response(snapshot, variants);
+    this.response(snapshot, variants);
     const result = await this.repository.mutateCart(userId, {
       operation,
       variantId,
@@ -119,7 +119,7 @@ export class CartService {
       throw new CartDomainException('CART_ITEM_NOT_FOUND', 'Cart item not found', 404);
     if (result === -5)
       throw new BadRequestException('Cart supports at most 100 distinct variants');
-    return response;
+    return this.getCart(userId, requestId);
   }
 
   private variant(variants: InternalCatalogVariant[], id: string): InternalCatalogVariant {

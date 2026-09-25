@@ -104,6 +104,7 @@ describe('Authenticated Cart HTTP integration', () => {
     expect(response.body.total).toBe('0.10');
     expect(h.calls).toEqual([
       { method: 'POST', url: '/internal/variants/batch', ids: [variantId], requestId },
+      { method: 'POST', url: '/internal/variants/batch', ids: [variantId], requestId },
     ]);
     expect(h.values.has(`cart:${userId}`)).toBe(true);
   });
