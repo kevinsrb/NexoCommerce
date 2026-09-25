@@ -94,6 +94,25 @@ describe('Cart domain through real service, repository and HTTP', () => {
     expect(h.calls.map((call) => call.ids)).toEqual([[variantId], [variantId]]);
   });
 
+  it('serializes concurrent adds without losing either quantity', async () => {
+    await Promise.all([add(variantId, 1).expect(201), add(variantId, 1).expect(201)]);
+
+    const response = await get().expect(200);
+    expect(response.body.itemCount).toBe(2);
+    expect(response.body.items[0]).toMatchObject({ variantId, quantity: 2 });
+  });
+
+  it('does not restore an item when update races with its deletion', async () => {
+    await add(variantId, 1).expect(201);
+    const [, update] = await Promise.all([
+      remove(variantId).expect(204),
+      patch(variantId, 2),
+    ]);
+
+    expect([200, 404]).toContain(update.status);
+    expect((await get().expect(200)).body).toEqual(emptyCart);
+  });
+
   it('treats uppercase and lowercase POST variant UUIDs as one canonical line', async () => {
     await add(variantId.toUpperCase(), 2).expect(201);
     const response = await add(variantId, 3).expect(201);

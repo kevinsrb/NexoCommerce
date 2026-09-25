@@ -8,6 +8,7 @@ describe('CartRepository', () => {
     del: jest.fn(),
     connect: jest.fn(),
     quit: jest.fn(),
+    eval: jest.fn(),
     isOpen: false,
   };
   let repository: CartRepository;
@@ -74,6 +75,24 @@ describe('CartRepository', () => {
     expect(redis.del).toHaveBeenCalledTimes(2);
     expect(redis.del).toHaveBeenNthCalledWith(1, `cart:${userId}`);
     expect(redis.del).toHaveBeenNthCalledWith(2, `cart:${userId}`);
+  });
+
+  it('uses the atomic mutation script with the thirty-day TTL', async () => {
+    redis.eval.mockResolvedValue(1);
+
+    await expect(repository.mutateCart(userId, {
+      operation: 'add',
+      variantId: 'variant-1',
+      quantity: 2,
+      currency: 'USD',
+      stock: 5,
+      updatedAt: '2026-09-13T00:00:00.000Z',
+    })).resolves.toBe(1);
+
+    expect(redis.eval).toHaveBeenCalledWith(expect.any(String), {
+      keys: [`cart:${userId}`],
+      arguments: ['add', 'variant-1', '2', 'USD', '5', '2592000', '2026-09-13T00:00:00.000Z'],
+    });
   });
 
   it('connects at startup and quits an open client during shutdown', async () => {

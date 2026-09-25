@@ -37,7 +37,83 @@ export interface CartRedisClient {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, options: { EX: number }): Promise<unknown>;
   del(key: string): Promise<unknown>;
+  eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown>;
 }
+
+export type CartMutation =
+  | { operation: 'add'; variantId: string; quantity: number; currency: string; stock: number; updatedAt: string }
+  | { operation: 'update'; variantId: string; quantity: number; currency: string; stock: number; updatedAt: string }
+  | { operation: 'remove'; variantId: string; updatedAt: string }
+  | { operation: 'clear' };
+
+export const CART_MUTATION_SCRIPT = `
+local key = KEYS[1]
+local operation = ARGV[1]
+local variantId = ARGV[2]
+local quantity = tonumber(ARGV[3])
+local currency = ARGV[4]
+local stock = tonumber(ARGV[5])
+local ttl = tonumber(ARGV[6])
+local updatedAt = ARGV[7]
+local raw = redis.call('GET', key)
+local cart = raw and cjson.decode(raw) or nil
+
+if operation == 'clear' then
+  return redis.call('DEL', key)
+end
+
+if operation == 'remove' then
+  if not cart then return 0 end
+  local items = {}
+  local removed = false
+  for _, item in ipairs(cart.items) do
+    if item.variantId == variantId then
+      removed = true
+    else
+      table.insert(items, item)
+    end
+  end
+  if not removed then return 0 end
+  if #items == 0 then
+    redis.call('DEL', key)
+    return 1
+  end
+  cart.items = items
+  cart.updatedAt = updatedAt
+  redis.call('SET', key, cjson.encode(cart), 'EX', ttl)
+  return 1
+end
+
+if not cart then
+  if operation ~= 'add' then return -4 end
+  cart = { currency = currency, items = {}, updatedAt = updatedAt }
+elseif cart.currency ~= currency then
+  return -2
+end
+
+local found = false
+for _, item in ipairs(cart.items) do
+  if item.variantId == variantId then
+    found = true
+    if operation == 'add' then
+      if item.quantity + quantity > stock then return -3 end
+      item.quantity = item.quantity + quantity
+    else
+      if quantity > stock then return -3 end
+      item.quantity = quantity
+    end
+  end
+end
+
+if operation == 'update' and not found then return -4 end
+if operation == 'add' and not found then
+  if quantity > stock then return -3 end
+  table.insert(cart.items, { variantId = variantId, quantity = quantity })
+end
+cart.updatedAt = updatedAt
+redis.call('SET', key, cjson.encode(cart), 'EX', ttl)
+return 1
+`;
 
 @Injectable()
 export class CartRepository implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -74,6 +150,26 @@ export class CartRepository implements OnApplicationBootstrap, OnApplicationShut
 
   async deleteCart(userId: string): Promise<void> {
     await this.redis.del(this.key(userId));
+  }
+
+  async mutateCart(userId: string, mutation: CartMutation): Promise<number> {
+    const args = mutation.operation === 'clear'
+      ? ['clear', '', '0', '', '0', '0', '']
+      : mutation.operation === 'remove'
+        ? ['remove', mutation.variantId, '0', '', '0', '2592000', mutation.updatedAt]
+        : [
+            mutation.operation,
+            mutation.variantId,
+            String(mutation.quantity),
+            mutation.currency,
+            String(mutation.stock),
+            '2592000',
+            mutation.updatedAt,
+          ];
+    return Number(await this.redis.eval(CART_MUTATION_SCRIPT, {
+      keys: [this.key(userId)],
+      arguments: args,
+    }));
   }
 
   private key(userId: string): string {

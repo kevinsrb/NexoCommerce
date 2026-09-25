@@ -140,6 +140,60 @@ export class CartHarness {
           this.values.delete(key);
           this.deletes.push(key);
         },
+        eval: async (_script: string, options: { keys: string[]; arguments: string[] }) => {
+          const [operation, variantId, quantityValue, currency, stockValue, ttlValue, updatedAt] = options.arguments;
+          const key = options.keys[0];
+          const current = this.values.get(key);
+          const cart = current ? JSON.parse(current) as {
+            currency: string;
+            items: Array<{ variantId: string; quantity: number }>;
+            updatedAt: string;
+          } : null;
+          if (operation === 'clear') {
+            this.values.delete(key);
+            this.deletes.push(key);
+            return 1;
+          }
+          if (operation === 'remove') {
+            if (!cart) return 0;
+            const items = cart.items.filter((item) => item.variantId !== variantId);
+            if (items.length === cart.items.length) return 0;
+            if (!items.length) {
+              this.values.delete(key);
+              this.deletes.push(key);
+              return 1;
+            }
+            const next = { ...cart, items, updatedAt };
+            this.values.set(key, JSON.stringify(next));
+            this.writes.push({ key, value: JSON.stringify(next), ttl: Number(ttlValue) });
+            return 1;
+          }
+          const quantity = Number(quantityValue);
+          const stock = Number(stockValue);
+          if (!cart) {
+            if (operation !== 'add') return -4;
+          } else if (cart.currency !== currency) return -2;
+          const next = cart ?? { currency, items: [], updatedAt };
+          const existing = next.items.find((item) => item.variantId === variantId);
+          if (operation === 'update' && !existing) return -4;
+          if (operation === 'add') {
+            if (existing) {
+              if (existing.quantity + quantity > stock) return -3;
+              existing.quantity += quantity;
+            } else {
+              if (quantity > stock) return -3;
+              next.items.push({ variantId, quantity });
+            }
+          } else {
+            if (quantity > stock) return -3;
+            existing!.quantity = quantity;
+          }
+          next.updatedAt = updatedAt;
+          const value = JSON.stringify(next);
+          this.values.set(key, value);
+          this.writes.push({ key, value, ttl: Number(ttlValue) });
+          return 1;
+        },
       })
       .compile();
     this.app = fixture.createNestApplication<NestExpressApplication>();

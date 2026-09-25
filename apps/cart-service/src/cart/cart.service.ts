@@ -40,7 +40,7 @@ export class CartService {
     else items.push({ variantId, quantity });
     if (items.length > 100)
       throw new BadRequestException('Cart supports at most 100 distinct variants');
-    return this.saveValidated(userId, cart?.currency, items, variantId, requestId);
+    return this.mutateValidated(userId, cart, items, variantId, quantity, requestId, 'add');
   }
 
   async updateItem(
@@ -57,34 +57,30 @@ export class CartService {
     const items = cart.items.map((item) =>
       item.variantId === variantId ? { variantId, quantity } : { ...item },
     );
-    return this.saveValidated(userId, cart.currency, items, variantId, requestId);
+    return this.mutateValidated(userId, cart, items, variantId, quantity, requestId, 'update');
   }
 
   async removeItem(userId: string, variantId: string): Promise<void> {
     variantId = variantId.toLowerCase();
-    const cart = await this.repository.getCart(userId);
-    if (!cart) return;
-    const items = cart.items.filter((item) => item.variantId !== variantId);
-    if (items.length === cart.items.length) return;
-    if (!items.length) await this.repository.deleteCart(userId);
-    else
-      await this.repository.saveCart(userId, {
-        currency: cart.currency,
-        items,
-        updatedAt: new Date().toISOString(),
-      });
+    await this.repository.mutateCart(userId, {
+      operation: 'remove',
+      variantId,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   async clearCart(userId: string): Promise<void> {
-    await this.repository.deleteCart(userId);
+    await this.repository.mutateCart(userId, { operation: 'clear' });
   }
 
-  private async saveValidated(
+  private async mutateValidated(
     userId: string,
-    currency: string | undefined,
+    cart: PersistedCart | null,
     items: PersistedCart['items'],
     variantId: string,
+    quantity: number,
     requestId: string,
+    operation: 'add' | 'update',
   ): Promise<CartResponse> {
     const variants = await this.catalog.getVariants(
       items.map((item) => item.variantId),
@@ -95,16 +91,32 @@ export class CartService {
       throw new CartDomainException('PRODUCT_INACTIVE', 'Product is inactive', 409);
     if (!variant.variantActive)
       throw new CartDomainException('VARIANT_INACTIVE', 'Variant is inactive', 409);
-    const quantity = items.find((item) => item.variantId === variantId)!.quantity;
-    if (quantity > variant.stock)
+    const requestedQuantity = operation === 'add'
+      ? (cart?.items.find((item) => item.variantId === variantId)?.quantity ?? 0) + quantity
+      : quantity;
+    if (requestedQuantity > variant.stock)
       throw new CartDomainException('INSUFFICIENT_STOCK', 'Insufficient stock', 409);
-    const cart = {
-      currency: currency ?? variant.currency,
+    const expectedCurrency = cart?.currency ?? variant.currency;
+    const snapshot = {
+      currency: expectedCurrency,
       items,
       updatedAt: new Date().toISOString(),
     };
-    const response = this.response(cart, variants);
-    await this.repository.saveCart(userId, cart);
+    const response = this.response(snapshot, variants);
+    const result = await this.repository.mutateCart(userId, {
+      operation,
+      variantId,
+      quantity,
+      currency: expectedCurrency,
+      stock: variant.stock,
+      updatedAt: snapshot.updatedAt,
+    });
+    if (result === -2)
+      throw new CartDomainException('CART_CURRENCY_MISMATCH', 'Cart currency mismatch', 409);
+    if (result === -3)
+      throw new CartDomainException('INSUFFICIENT_STOCK', 'Insufficient stock', 409);
+    if (result === -4)
+      throw new CartDomainException('CART_ITEM_NOT_FOUND', 'Cart item not found', 404);
     return response;
   }
 
