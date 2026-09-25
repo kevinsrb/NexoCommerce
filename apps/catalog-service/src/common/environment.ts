@@ -8,6 +8,12 @@ export const parseEnvironment = (input: NodeJS.ProcessEnv) => {
   if (!['postgres:', 'postgresql:'].includes(new URL(environment.DATABASE_URL).protocol)) {
     throw new Error('Catalog DATABASE_URL must be a PostgreSQL URL');
   }
+  if (
+    environment.CATALOG_ADMIN_SECRET === environment.JWT_ACCESS_SECRET ||
+    environment.CATALOG_ADMIN_SECRET === environment.CATALOG_INTERNAL_TOKEN
+  ) {
+    throw new Error('Catalog admin proof secret must differ from service secrets');
+  }
   return environment;
 };
 export type CatalogEnvironment = ReturnType<typeof parseEnvironment>;

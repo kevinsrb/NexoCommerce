@@ -23,6 +23,12 @@ export const parseEnvironment = (input: NodeJS.ProcessEnv) => {
   if (environment.JWT_ACCESS_SECRET === environment.JWT_REFRESH_SECRET) {
     throw new Error('Access and refresh JWT secrets must differ');
   }
+  if (
+    environment.CATALOG_ADMIN_SECRET === environment.JWT_ACCESS_SECRET ||
+    environment.CATALOG_ADMIN_SECRET === environment.JWT_REFRESH_SECRET
+  ) {
+    throw new Error('Catalog admin proof secret must differ from JWT secrets');
+  }
   return {
     ...environment,
     JWT_ACCESS_TTL_SECONDS: ttl(input.JWT_ACCESS_TTL_SECONDS, 900),

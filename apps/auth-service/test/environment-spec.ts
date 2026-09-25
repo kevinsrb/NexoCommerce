@@ -16,6 +16,8 @@ describe('Auth environment', () => {
     expect(() => parseEnvironment({ ...valid, DATABASE_URL: 'https://example.com' })).toThrow();
     expect(() => parseEnvironment({ ...valid, JWT_ACCESS_TTL_SECONDS: '1.5' })).toThrow();
     expect(() => parseEnvironment({ ...valid, JWT_REFRESH_TTL_SECONDS: '0' })).toThrow();
+    expect(() => parseEnvironment({ ...valid, CATALOG_ADMIN_SECRET: valid.JWT_ACCESS_SECRET })).toThrow();
+    expect(() => parseEnvironment({ ...valid, CATALOG_ADMIN_SECRET: valid.JWT_REFRESH_SECRET })).toThrow();
     expect(parseEnvironment(valid).JWT_ACCESS_TTL_SECONDS).toBe(900);
   });
 });

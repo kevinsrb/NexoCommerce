@@ -11,6 +11,9 @@ export const parseEnvironment = (input: NodeJS.ProcessEnv) => {
   if (!['http:', 'https:'].includes(new URL(environment.CATALOG_SERVICE_URL).protocol)) {
     throw new Error('Cart CATALOG_SERVICE_URL must be an HTTP URL');
   }
+  if (environment.CATALOG_INTERNAL_TOKEN === environment.JWT_ACCESS_SECRET) {
+    throw new Error('Catalog service token must differ from the Cart JWT secret');
+  }
   return environment;
 };
 export type CartEnvironment = ReturnType<typeof parseEnvironment>;

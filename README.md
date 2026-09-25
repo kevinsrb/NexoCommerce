@@ -171,7 +171,7 @@ All backends use NestJS with Express. They apply Helmet, global DTO validation (
 
 Cart validates Auth access JWTs locally, stores only temporary Redis state with a 30-day TTL renewed by mutations, and batch-validates current variant state through Catalog. Cart-to-Catalog calls send the configured service credential and preserve the Gateway request ID. Catalog administration additionally requires an Auth-issued ADMIN proof signed with the separate `CATALOG_ADMIN_SECRET`, which Cart never receives. A Cart has one currency, uses current Catalog prices, does not reserve or decrement stock, and never writes to PostgreSQL. Redis operational failures return `503 CART_STORAGE_UNAVAILABLE`.
 
-Catalog's `POST /categories`, `POST /products`, and `PATCH /products/:id` are intentionally **unauthenticated temporary administration endpoints** in Phase 1. They must receive authorization before public production administration is enabled.
+Catalog's `POST /categories`, `POST /products`, and `PATCH /products/:id` require an Auth-issued ADMIN JWT through the Gateway. Public Catalog GET routes remain unauthenticated.
 
 ## Technical decisions
 

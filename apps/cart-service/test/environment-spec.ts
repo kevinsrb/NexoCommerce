@@ -19,6 +19,7 @@ describe('Cart environment', () => {
     { ...valid, CATALOG_SERVICE_URL: 'https://catalog.internal.test?token=secret' },
     { ...valid, CATALOG_SERVICE_URL: 'https://catalog.internal.test#fragment' },
     { ...valid, JWT_ACCESS_SECRET: 'short' },
+    { ...valid, CATALOG_INTERNAL_TOKEN: valid.JWT_ACCESS_SECRET },
     { ...valid, PORT: '0' },
     { ...valid, PORT: '65536' },
     { ...valid, PORT: 'abc' },

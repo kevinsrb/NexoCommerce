@@ -19,14 +19,13 @@ uses the validated Catalog environment parser. `DATABASE_URL` must use PostgreSQ
 | GET | `/products?limit=20&offset=0` | Array of active products; limit 1–100, nonnegative offset, ordered by slug |
 | GET | `/products/:slug` | Active product detail; missing/inactive products return 404 |
 | GET | `/categories` | Array of categories, ordered by slug |
-| POST | `/categories` | Creates a category from `name` and unique lowercase `slug` |
-| POST | `/products` | Creates a product and its variants atomically |
-| PATCH | `/products/:id` | Updates supplied product fields by UUID |
+| POST | `/categories` | Creates a category from `name` and unique lowercase `slug`; requires an ADMIN Auth JWT |
+| POST | `/products` | Creates a product and its variants atomically; requires an ADMIN Auth JWT |
+| PATCH | `/products/:id` | Updates supplied product fields by UUID; requires an ADMIN Auth JWT |
 
-Phase 1 deliberately defers distributed authorization. The three write endpoints
-are temporary **unauthenticated administration endpoints**. No Auth JWT or role
-checks are implemented here. They must gain authorization before public production
-administration is enabled. CORS currently permits all origins without credentials.
+Catalog validates Auth-issued access JWTs locally for the three write endpoints and
+requires the signed `ADMIN` role proof. CUSTOMER and anonymous requests are rejected.
+CORS currently permits all origins without credentials.
 
 Example create-product body:
 
