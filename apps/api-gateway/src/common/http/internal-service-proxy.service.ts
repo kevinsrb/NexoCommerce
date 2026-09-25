@@ -1,4 +1,4 @@
-import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { type Request, type Response } from 'express';
 
 import {
@@ -30,7 +30,8 @@ export class InternalServiceProxy {
       if (contentType) response.setHeader('content-type', contentType);
 
       response.status(upstream.status).send(body);
-    } catch {
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
       throw new ServiceUnavailableException('Internal service unavailable');
     }
   }
@@ -59,7 +60,14 @@ export class InternalServiceProxy {
         : service === 'catalog'
           ? this.environment.CATALOG_SERVICE_URL
           : this.environment.CART_SERVICE_URL;
-    const internalPath = request.originalUrl.replace(/^\/api(?=\/|$)/, '');
+    const originalUrl = request.originalUrl;
+    if (!originalUrl.startsWith('/') || originalUrl.startsWith('//')) {
+      throw new BadRequestException('Invalid request target');
+    }
+    const internalPath = originalUrl.replace(/^\/api(?=\/|$)/, '');
+    if (!internalPath.startsWith('/') || internalPath.startsWith('//')) {
+      throw new BadRequestException('Invalid request target');
+    }
     return new URL(internalPath, serviceUrl);
   }
 

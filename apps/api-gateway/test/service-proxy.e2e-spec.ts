@@ -6,6 +6,7 @@ import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
 import { configureHttpApp, configureSwagger } from '../src/main';
+import { InternalServiceProxy } from '../src/common/http/internal-service-proxy.service';
 
 type ReceivedRequest = {
   method: string | undefined;
@@ -248,6 +249,24 @@ describe('API Gateway service proxy', () => {
       expect.objectContaining({ method: 'DELETE', url: '/cart' }),
     ]);
   });
+
+  it.each(['http://attacker.example/api/products', 'https://attacker.example/api/products', '//attacker.example/api/products'])
+    ('rejects absolute-form target %s before any upstream request', async (originalUrl) => {
+      const proxy = app.get(InternalServiceProxy);
+      const fetchMock = jest.spyOn(global, 'fetch');
+      const requestLike = {
+        originalUrl,
+        method: 'GET',
+        body: undefined,
+        header: () => undefined,
+      } as never;
+
+      await expect(
+        proxy.forward(requestLike, {} as never, 'catalog'),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(fetchMock).not.toHaveBeenCalled();
+      fetchMock.mockRestore();
+    });
 
   it('returns a safe public response when the Cart service times out', async () => {
     const response = await request(app.getHttpServer()).get('/api/cart?timeout=true').expect(503);
