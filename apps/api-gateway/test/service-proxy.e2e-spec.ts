@@ -250,7 +250,7 @@ describe('API Gateway service proxy', () => {
     ]);
   });
 
-  it.each(['http://attacker.example/api/products', 'https://attacker.example/api/products', '//attacker.example/api/products'])
+  it.each(['http://attacker.example/api/products', 'https://attacker.example/api/products', '//attacker.example/api/products', '/api/\\attacker.example/products'])
     ('rejects absolute-form target %s before any upstream request', async (originalUrl) => {
       const proxy = app.get(InternalServiceProxy);
       const fetchMock = jest.spyOn(global, 'fetch');

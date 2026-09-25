@@ -61,7 +61,7 @@ export class InternalServiceProxy {
           ? this.environment.CATALOG_SERVICE_URL
           : this.environment.CART_SERVICE_URL;
     const originalUrl = request.originalUrl;
-    if (!originalUrl.startsWith('/') || originalUrl.startsWith('//')) {
+    if (!originalUrl.startsWith('/') || originalUrl.startsWith('//') || originalUrl.includes('\\')) {
       throw new BadRequestException('Invalid request target');
     }
     const internalPath = originalUrl.replace(/^\/api(?=\/|$)/, '');
