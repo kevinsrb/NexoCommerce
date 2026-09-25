@@ -1,4 +1,5 @@
 import { Injectable, type OnApplicationBootstrap, type OnApplicationShutdown } from '@nestjs/common';
+import { CartStorageUnavailableException } from '../common/cart-domain.exception';
 
 export interface PersistedCart {
   currency: string;
@@ -128,7 +129,12 @@ export class CartRepository implements OnApplicationBootstrap, OnApplicationShut
   }
 
   async getCart(userId: string): Promise<PersistedCart | null> {
-    const serialized = await this.redis.get(this.key(userId));
+    let serialized: string | null;
+    try {
+      serialized = await this.redis.get(this.key(userId));
+    } catch {
+      throw new CartStorageUnavailableException();
+    }
     if (serialized === null) return null;
     try {
       const parsed: unknown = JSON.parse(serialized);
@@ -145,11 +151,19 @@ export class CartRepository implements OnApplicationBootstrap, OnApplicationShut
       items: cart.items.map(({ variantId, quantity }) => ({ variantId, quantity })),
       updatedAt: cart.updatedAt,
     };
-    await this.redis.set(this.key(userId), JSON.stringify(persisted), { EX: CART_TTL_SECONDS });
+    try {
+      await this.redis.set(this.key(userId), JSON.stringify(persisted), { EX: CART_TTL_SECONDS });
+    } catch {
+      throw new CartStorageUnavailableException();
+    }
   }
 
   async deleteCart(userId: string): Promise<void> {
-    await this.redis.del(this.key(userId));
+    try {
+      await this.redis.del(this.key(userId));
+    } catch {
+      throw new CartStorageUnavailableException();
+    }
   }
 
   async mutateCart(userId: string, mutation: CartMutation): Promise<number> {
@@ -166,10 +180,14 @@ export class CartRepository implements OnApplicationBootstrap, OnApplicationShut
             '2592000',
             mutation.updatedAt,
           ];
-    return Number(await this.redis.eval(CART_MUTATION_SCRIPT, {
-      keys: [this.key(userId)],
-      arguments: args,
-    }));
+    try {
+      return Number(await this.redis.eval(CART_MUTATION_SCRIPT, {
+        keys: [this.key(userId)],
+        arguments: args,
+      }));
+    } catch {
+      throw new CartStorageUnavailableException();
+    }
   }
 
   private key(userId: string): string {

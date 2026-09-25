@@ -33,6 +33,7 @@ export class CartHarness {
   }> = [];
   mode: 'ok' | 'status' | 'json' | 'shape' | 'row' | 'interrupted' | 'timeout' | 'body-timeout' =
     'ok';
+  storageFailure = false;
   variants: InternalCatalogVariant[] = [];
   reset(): void {
     this.values.clear();
@@ -40,6 +41,7 @@ export class CartHarness {
     this.deletes = [];
     this.calls = [];
     this.mode = 'ok';
+    this.storageFailure = false;
     this.variants = [variantId, otherId].map((id) => ({
       id,
       productId: userId,
@@ -131,16 +133,22 @@ export class CartHarness {
         isOpen: false,
         connect: async () => undefined,
         quit: async () => undefined,
-        get: async (key: string) => this.values.get(key) ?? null,
-        set: async (key: string, value: string, options: { EX: number }) => {
-          this.values.set(key, value);
+         get: async (key: string) => {
+           if (this.storageFailure) throw new Error('private redis failure');
+           return this.values.get(key) ?? null;
+         },
+         set: async (key: string, value: string, options: { EX: number }) => {
+           if (this.storageFailure) throw new Error('private redis failure');
+           this.values.set(key, value);
           this.writes.push({ key, value, ttl: options.EX });
         },
-        del: async (key: string) => {
-          this.values.delete(key);
+         del: async (key: string) => {
+           if (this.storageFailure) throw new Error('private redis failure');
+           this.values.delete(key);
           this.deletes.push(key);
         },
         eval: async (_script: string, options: { keys: string[]; arguments: string[] }) => {
+          if (this.storageFailure) throw new Error('private redis failure');
           const [operation, variantId, quantityValue, currency, stockValue, ttlValue, updatedAt] = options.arguments;
           const key = options.keys[0];
           const current = this.values.get(key);

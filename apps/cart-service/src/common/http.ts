@@ -11,7 +11,7 @@ import { type ApiError } from '@nexo/contracts';
 import { createLogger, withRequestContext } from '@nexo/logger';
 import { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
-import { CartDomainException } from './cart-domain.exception';
+import { CartDomainException, CartStorageUnavailableException } from './cart-domain.exception';
 
 const logger = createLogger('cart-service');
 type ContextRequest = Request & { requestId?: string };
@@ -47,6 +47,12 @@ class HttpExceptionFilter implements ExceptionFilter {
               : 'Internal server error',
       requestId: request.requestId ?? 'unknown',
     };
+    if (error instanceof CartStorageUnavailableException) {
+      logger.error(
+        { event: 'cart_storage_unavailable', requestId: body.requestId },
+        'Cart storage unavailable',
+      );
+    }
     response.status(statusCode).json(body);
   }
 }

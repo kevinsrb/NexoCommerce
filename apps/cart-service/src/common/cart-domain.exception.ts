@@ -9,3 +9,9 @@ export class CartDomainException extends HttpException {
     super(message, statusCode);
   }
 }
+
+export class CartStorageUnavailableException extends CartDomainException {
+  constructor() {
+    super('CART_STORAGE_UNAVAILABLE', 'Cart storage unavailable', 503);
+  }
+}

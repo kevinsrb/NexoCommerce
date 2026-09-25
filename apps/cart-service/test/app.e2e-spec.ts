@@ -108,6 +108,22 @@ describe('Authenticated Cart HTTP integration', () => {
     expect(h.values.has(`cart:${userId}`)).toBe(true);
   });
 
+  it('maps Redis failures to a safe storage-unavailable envelope', async () => {
+    h.storageFailure = true;
+    const response = await request(h.app.getHttpServer())
+      .get('/cart')
+      .set('Authorization', `Bearer ${h.token()}`)
+      .set('x-request-id', requestId)
+      .expect(503);
+
+    expect(response.body).toEqual({
+      statusCode: 503,
+      code: 'CART_STORAGE_UNAVAILABLE',
+      message: 'Cart storage unavailable',
+      requestId,
+    });
+  });
+
   it('reuses its generated request ID when the incoming ID is invalid', async () => {
     const response = await request(h.app.getHttpServer())
       .post('/cart/items')
