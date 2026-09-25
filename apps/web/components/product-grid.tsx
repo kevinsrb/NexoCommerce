@@ -1,4 +1,5 @@
 import type { StorefrontProduct } from '../lib/catalog';
+import { AddToCartButton } from './add-to-cart-button';
 
 type ProductGridProps = {
   products: readonly StorefrontProduct[];
@@ -8,7 +9,7 @@ export function ProductGrid({ products }: ProductGridProps) {
   return (
     <ul aria-label="Product grid" className="grid gap-5 md:grid-cols-3">
       {products.map((product) => (
-        <li key={product.name}>
+        <li key={product.id}>
           <article className="group rounded-3xl border border-white/10 bg-white/[0.03] p-4 transition hover:-translate-y-1 hover:border-emerald-300/40">
             <div className={`mb-5 h-52 rounded-2xl bg-gradient-to-br ${product.accent} p-5`} aria-hidden="true">
               <span className="inline-flex rounded-full bg-slate-950/70 px-3 py-1 text-xs font-medium text-white">
@@ -21,6 +22,7 @@ export function ProductGrid({ products }: ProductGridProps) {
                 <p className="text-sm font-medium text-emerald-200">{product.price}</p>
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-400">{product.description}</p>
+              <AddToCartButton variantId={product.variantId} productName={product.name} />
             </div>
           </article>
         </li>

@@ -1,10 +1,14 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import Home from '../app/page';
 import { ProductStates } from '../components/product-states';
+import { CartProvider } from '../components/cart-provider';
+import { emptyCart, filledCart, jsonResponse, variantId } from './cart-fixtures';
 
 const testProducts = [
   {
+    id: 'lamp',
+    variantId: 'lamp-standard',
     name: 'Arc Lamp',
     description: 'Soft, directed light for slower evenings.',
     price: '$128.00',
@@ -24,14 +28,13 @@ describe('Home', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    localStorage.clear();
     if (originalGatewayUrl === undefined) delete process.env.NEXT_PUBLIC_API_GATEWAY_URL;
     else process.env.NEXT_PUBLIC_API_GATEWAY_URL = originalGatewayUrl;
   });
 
   it('renders the storefront navigation, hero, and loading product boundary', async () => {
-    render(<Home />);
-
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    await act(async () => { render(<CartProvider><Home /></CartProvider>); });
 
     expect(screen.getByRole('navigation', { name: /primary navigation/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /commerce that feels effortless/i })).toBeInTheDocument();
@@ -40,18 +43,42 @@ describe('Home', () => {
   });
 
   it('links Experience to the rendered product-state boundary', async () => {
-    render(<Home />);
+    await act(async () => { render(<CartProvider><Home /></CartProvider>); });
 
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
-
-    expect(screen.getByRole('link', { name: /experience/i })).toHaveAttribute('href', '#states');
+    expect(screen.getByRole('link', { name: /experience/i })).toHaveAttribute('href', '/#states');
     expect(document.getElementById('states')).toBeInTheDocument();
+  });
+
+  it('adds the catalog-selected active variant from Home and exposes its cart link', async () => {
+    localStorage.setItem('nexo.access-token', 'browser-token');
+    global.fetch = (async (input, init) => {
+      const url = String(input);
+      expect(url.startsWith('https://gateway.example.test/api/')).toBe(true);
+      if (url.endsWith('/products')) return jsonResponse([{
+        id: filledCart.items[0].productId, name: 'Gateway Lamp', slug: 'gateway-lamp',
+        description: 'A warm light.', active: true, category: { id: 'lighting', name: 'Lighting', slug: 'lighting' },
+        variants: [
+          { id: 'inactive', name: 'Retired', sku: 'OLD', active: false, price: '1.00', currency: 'USD', stock: 0 },
+          { id: variantId, name: 'Standard', sku: 'LAMP', active: true, price: '128.00', currency: 'USD', stock: 4 },
+        ],
+      }]);
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer browser-token');
+      if (url.endsWith('/cart') && init?.method === 'GET') return jsonResponse(emptyCart);
+      expect(url).toBe('https://gateway.example.test/api/cart/items');
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(init?.body as string)).toEqual({ variantId, quantity: 1 });
+      return jsonResponse(filledCart, 201);
+    }) as typeof fetch;
+    render(<CartProvider><Home /></CartProvider>);
+    const add = await screen.findByRole('button', { name: /add Gateway Lamp to cart/i });
+    fireEvent.click(add);
+    expect(await screen.findByRole('link', { name: /cart.*1/i })).toHaveAttribute('href', '/cart');
   });
 });
 
 describe('ProductStates', () => {
-  it('renders the product grid in ready mode', () => {
-    render(<ProductStates state="ready" products={testProducts} />);
+  it('renders the product grid in ready mode', async () => {
+    await act(async () => { render(<CartProvider><ProductStates state="ready" products={testProducts} /></CartProvider>); });
 
     expect(screen.getByRole('list', { name: /product grid/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /arc lamp/i })).toBeInTheDocument();

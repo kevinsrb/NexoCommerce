@@ -1,4 +1,6 @@
 export type StorefrontProduct = {
+  id: string;
+  variantId: string | null;
   name: string;
   description: string;
   price: string;
@@ -7,11 +9,12 @@ export type StorefrontProduct = {
 };
 
 type CatalogProduct = {
+  id: string;
   name: string;
   description: string;
   slug: string;
   category: { name: string };
-  variants: Array<{ price: string; currency: string }>;
+  variants: Array<{ id: string; active: boolean; price: string; currency: string }>;
 };
 
 const accents = [
@@ -20,25 +23,38 @@ const accents = [
   'from-emerald-200/70 to-teal-500/20',
 ] as const;
 
-const publicGatewayUrl = (): string => {
+export const publicGatewayUrl = (): string => {
   const value = process.env.NEXT_PUBLIC_API_GATEWAY_URL;
   if (!value) throw new Error('NEXT_PUBLIC_API_GATEWAY_URL is required');
   return value.replace(/\/$/, '');
 };
 
-const formatPrice = (price: string, currency: string): string =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(price));
+const formatPrice = (price: string, currency: string): string => {
+  const [whole, fraction = ''] = price.split('.');
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+    .formatToParts(BigInt(whole))
+    .map((part) => part.type === 'fraction' ? { ...part, value: fraction.padEnd(2, '0') } : part)
+    .map((part) => part.value)
+    .join('');
+};
 
-const toStorefrontProduct = (product: CatalogProduct, index: number): StorefrontProduct => ({
-  name: product.name,
-  description: product.description,
-  price:
-    product.variants[0] === undefined
-      ? 'Price unavailable'
-      : formatPrice(product.variants[0].price, product.variants[0].currency),
-  category: product.category.name,
-  accent: accents[index % accents.length],
-});
+const toStorefrontProduct = (product: CatalogProduct, index: number): StorefrontProduct => {
+  const variant = product.variants.find((candidate) => candidate.active);
+  return {
+    id: product.id,
+    variantId: variant?.id ?? null,
+    name: product.name,
+    description: product.description,
+    price: variant === undefined ? 'Price unavailable' : formatPrice(variant.price, variant.currency),
+    category: product.category.name,
+    accent: accents[index % accents.length],
+  };
+};
 
 export const loadCatalogProducts = async (): Promise<StorefrontProduct[]> => {
   const response = await fetch(`${publicGatewayUrl()}/products`, {
