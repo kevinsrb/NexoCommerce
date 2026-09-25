@@ -31,7 +31,7 @@ The Gateway exposes these authenticated Cart routes:
 | `DELETE /api/cart/items/:variantId` | Remove one line, idempotently |
 | `DELETE /api/cart` | Clear the cart, idempotently |
 
-Cart validates the Auth-issued HS256 access JWT locally using the shared access secret. It accepts only an unexpired token with a UUID `sub` and `type: "access"`. Valid `x-request-id` values are preserved across Gateway, Cart, and Cart's Catalog lookup.
+Cart validates the Auth-issued HS256 access JWT locally using the shared access secret. It accepts only an unexpired token with a UUID `sub` and `type: "access"`. Catalog validates the same signed claims and additionally requires an Auth-issued ADMIN proof derived from the separate `CATALOG_ADMIN_SECRET`; Cart does not receive that secret and cannot forge Catalog administrator claims. Valid `x-request-id` values are preserved across Gateway, Cart, and Cart's Catalog lookup.
 
 ## Catalog integration
 
