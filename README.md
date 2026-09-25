@@ -108,7 +108,7 @@ Copy each example file rather than committing a real `.env` file. The validation
 | `apps/cart-service/.env` | `NODE_ENV`, `PORT`, `REDIS_URL`, `CATALOG_SERVICE_URL`, `JWT_ACCESS_SECRET` | Cart runtime; `PORT=3004`, Redis, Catalog's internal origin, and the Auth-compatible access secret. Cart has no PostgreSQL database. |
 | `apps/web/.env` | `NEXT_PUBLIC_API_GATEWAY_URL` | Required public browser API origin; the local example is `http://localhost:3003/api`. The storefront uses it for Catalog data and does not know a Catalog Service URL. |
 
-Normal Gateway starts load the `.env` in its application directory with `dotenv`; Auth and Catalog use `dotenv/config` for the same app-local behavior. Prisma operations need `DATABASE_URL` too. The root alias commands below run Prisma from the relevant service and read that service’s `.env`; use the explicit environment setup only when validating a schema directly from the root:
+Normal Gateway starts load the `.env` in its application directory with `dotenv`; Auth, Catalog, and Cart use `dotenv/config` for the same app-local behavior. Prisma operations need `DATABASE_URL` too. The root alias commands below run Prisma from the relevant service and read that service’s `.env`; use the explicit environment setup only when validating a schema directly from the root:
 
 ```powershell
 # Auth schema validation from the repository root (does not contact PostgreSQL)
