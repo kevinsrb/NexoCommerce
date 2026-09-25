@@ -10,6 +10,6 @@ The Cart service owns temporary Redis-backed customer cart state. Configure `.en
 - `DELETE /cart/items/:variantId`
 - `DELETE /cart`
 
-Cart accepts Auth-issued HS256 access JWTs and stores `cart:{userId}` in Redis with a 30-day (`2592000` seconds) TTL. Mutations renew the TTL; reads do not. The stored value contains only currency, variant IDs, quantities, and `updatedAt`. Catalog is queried for current product state, price, currency, and stock through its private batch endpoint.
+Cart accepts Auth-issued HS256 access JWTs and stores `cart:{userId}` in Redis with a 30-day (`2592000` seconds) TTL. Mutations renew the TTL; reads do not. The stored value contains only currency, variant IDs, quantities, and `updatedAt`. Catalog is queried for current product state, price, currency, and stock through its private batch endpoint using the shared `CATALOG_INTERNAL_TOKEN` service credential. Redis outages return `503 CART_STORAGE_UNAVAILABLE` without exposing Redis details.
 
 The first item establishes one Cart currency. A different current currency returns `CART_CURRENCY_MISMATCH`. Cart validates stock but does not reserve or decrement it. Inactive lines remain removable. Cart has no PostgreSQL persistence, Orders, checkout, payments, or sign-in UI.

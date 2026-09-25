@@ -35,7 +35,9 @@ Cart validates the Auth-issued HS256 access JWT locally using the shared access 
 
 ## Catalog integration
 
-Cart calls Catalog's private `POST /internal/variants/batch` endpoint with up to 100 UUIDs. Catalog returns a narrow projection containing variant/product IDs, names, decimal-string price, currency, stock, and both active flags. Missing variants are absent from the result and become `VARIANT_NOT_FOUND` in Cart. Transport failures, timeouts, non-success responses, malformed JSON, and interrupted bodies become `503 CATALOG_UNAVAILABLE`.
+Cart calls Catalog's private `POST /internal/variants/batch` endpoint with up to 100 UUIDs and the configured `CATALOG_INTERNAL_TOKEN` in `x-internal-service-token`. Catalog rejects missing or incorrect service credentials with 401. This explicit shared-secret strategy is the current Phase 2 service-to-service authentication mechanism and can be replaced by infrastructure-level identity, mTLS, or a dedicated authorization system later. The route is not exposed by the public Gateway.
+
+Catalog returns a narrow projection containing variant/product IDs, names, decimal-string price, currency, stock, and both active flags. Missing variants are absent from the result and are returned by Cart as `available: false` lines with zero subtotal so users can remove them. Transport failures, timeouts, non-success responses, malformed JSON, and interrupted bodies become `503 CATALOG_UNAVAILABLE`.
 
 Cart validates every mutation against current Catalog state. It does not import Catalog Prisma code, access `catalog_db`, reserve inventory, or decrement stock.
 
@@ -52,6 +54,8 @@ The only Cart persistence key is `cart:{userId}`. Its JSON value is:
 ```
 
 Each save uses `EX 2592000` (30 days). Adds, quantity replacements, and item removals that leave lines renew the TTL. Reads do not renew it. Removing the final line deletes the key, so an empty cart has no currency. Malformed persisted state fails closed at the repository boundary rather than reaching Cart domain logic.
+
+Cart add, update, remove, and clear mutations use one Redis Lua script per operation, making each state transition atomic for a user key while preserving the TTL rule. Redis operational failures return `503 CART_STORAGE_UNAVAILABLE` and are logged with the request ID without Redis connection details.
 
 The first current Catalog variant establishes the Cart currency. A later incompatible currency returns `409 CART_CURRENCY_MISMATCH` and leaves Redis unchanged. A currency change in Catalog for an existing line also fails closed until that line is removed.
 
