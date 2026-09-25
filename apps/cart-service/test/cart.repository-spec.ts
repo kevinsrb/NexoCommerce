@@ -29,6 +29,12 @@ describe('CartRepository', () => {
     await expect(repository.getCart(userId)).rejects.toThrow('Invalid persisted cart');
   });
 
+  it('rejects syntactically valid persisted data with an invalid cart shape', async () => {
+    redis.get.mockResolvedValue(JSON.stringify({ currency: 'USD', items: [{ quantity: 0 }] }));
+
+    await expect(repository.getCart(userId)).rejects.toThrow('Invalid persisted cart');
+  });
+
   it('persists only Cart state under its namespaced key for thirty days', async () => {
     const cart = {
       currency: 'USD',

@@ -4,7 +4,7 @@ import { parseCartEnvironment } from '@nexo/config';
 export const CART_ENVIRONMENT = Symbol('CART_ENVIRONMENT');
 
 export const parseEnvironment = (input: NodeJS.ProcessEnv) => {
-  const environment = parseCartEnvironment({ PORT: '3003', ...input });
+  const environment = parseCartEnvironment({ PORT: '3004', ...input });
   if (!['redis:', 'rediss:'].includes(new URL(environment.REDIS_URL).protocol)) {
     throw new Error('Cart REDIS_URL must be a Redis URL');
   }

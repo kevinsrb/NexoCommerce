@@ -26,6 +26,6 @@ describe('Cart environment', () => {
   });
 
   it('defaults to Cart port with valid dependencies', () => {
-    expect(parseEnvironment(valid)).toEqual({ ...valid, NODE_ENV: 'development', PORT: 3003 });
+    expect(parseEnvironment(valid)).toEqual({ ...valid, NODE_ENV: 'development', PORT: 3004 });
   });
 });

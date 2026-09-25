@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -132,6 +132,7 @@ export class ListProductsDto {
 }
 
 export class BatchVariantsDto {
+  @Transform(({ value }) => Array.isArray(value) ? value.map((id: unknown) => typeof id === 'string' ? id.toLowerCase() : id) : value)
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(100)

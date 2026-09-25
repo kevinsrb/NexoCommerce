@@ -294,6 +294,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
   it.each([
     { ids: ['not-a-uuid'] },
     { ids: [variantId, variantId] },
+    { ids: [variantId, variantId.toUpperCase()] },
     { ids: Array.from({ length: 101 }, () => variantId) },
     { ids: variantId },
   ])('rejects invalid internal variant batches before persistence: %j', async (body) => {
