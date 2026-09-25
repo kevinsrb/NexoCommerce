@@ -5,6 +5,7 @@ describe('Auth environment', () => {
     DATABASE_URL: 'postgresql://nexo:password@localhost:5432/auth_db',
     JWT_ACCESS_SECRET: 'a'.repeat(32),
     JWT_REFRESH_SECRET: 'r'.repeat(32),
+    CATALOG_ADMIN_SECRET: 'c'.repeat(32),
   };
   it('requires valid database and independent strong secrets', () => {
     expect(() => parseEnvironment({})).toThrow();

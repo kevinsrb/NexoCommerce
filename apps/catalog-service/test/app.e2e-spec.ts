@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { createHmac } from 'node:crypto';
 import { JwtService } from '@nestjs/jwt';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -18,10 +19,18 @@ const unknownVariantId = '550e8400-e29b-41d4-a716-446655440005';
 const timestamp = new Date('2026-09-07T00:00:00Z');
 const accessSecret = 'access-secret-for-catalog-tests-at-least-32-characters';
 const internalToken = 'catalog-internal-token-at-least-32-characters';
+const catalogAdminSecret = 'catalog-admin-secret-for-tests-at-least-32';
 const jwt = new JwtService();
 const token = (role: 'CUSTOMER' | 'ADMIN') =>
   jwt.sign(
-    { sub: '550e8400-e29b-41d4-a716-446655440099', type: 'access', role },
+    {
+      sub: '550e8400-e29b-41d4-a716-446655440099',
+      type: 'access',
+      role,
+      ...(role === 'ADMIN'
+        ? { adminProof: createHmac('sha256', catalogAdminSecret).update('550e8400-e29b-41d4-a716-446655440099:ADMIN').digest('base64url') }
+        : {}),
+    },
     { secret: accessSecret, expiresIn: '5m' },
   );
 const category = {
@@ -138,6 +147,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
           DATABASE_URL: 'postgresql://nexo:nexo_local_password@localhost:5432/catalog_db',
           JWT_ACCESS_SECRET: accessSecret,
           CATALOG_INTERNAL_TOKEN: internalToken,
+          CATALOG_ADMIN_SECRET: catalogAdminSecret,
           NODE_ENV: 'test',
         }),
       )

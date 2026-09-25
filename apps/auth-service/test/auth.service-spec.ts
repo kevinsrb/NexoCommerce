@@ -10,7 +10,8 @@ import { PrismaService } from '../src/prisma/prisma.service';
 const environment = parseEnvironment({
   DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/auth_db',
   JWT_ACCESS_SECRET: 'access-secret-for-tests-at-least-32-characters',
-  JWT_REFRESH_SECRET: 'refresh-secret-for-tests-at-least-32-characters',
+    JWT_REFRESH_SECRET: 'refresh-secret-for-tests-at-least-32-characters',
+  CATALOG_ADMIN_SECRET: 'catalog-admin-secret-for-tests-at-least-32',
 });
 
 describe('AuthService security', () => {

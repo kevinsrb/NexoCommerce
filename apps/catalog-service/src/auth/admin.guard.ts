@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
   CanActivate,
   ExecutionContext,
@@ -11,7 +12,7 @@ import { type Request } from 'express';
 import { CATALOG_ENVIRONMENT, type CatalogEnvironment } from '../common/environment';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-type AccessClaims = { sub?: unknown; type?: unknown; role?: unknown };
+type AccessClaims = { sub?: unknown; type?: unknown; role?: unknown; adminProof?: unknown };
 
 @Injectable()
 export class AdminGuard implements CanActivate {
@@ -44,6 +45,16 @@ export class AdminGuard implements CanActivate {
       throw new UnauthorizedException('Invalid access token');
     }
     if (claims.role !== 'ADMIN') throw new ForbiddenException('Admin role required');
+    const expectedProof = createHmac('sha256', this.environment.CATALOG_ADMIN_SECRET)
+      .update(`${claims.sub}:ADMIN`)
+      .digest('base64url');
+    const actualProof = typeof claims.adminProof === 'string' ? Buffer.from(claims.adminProof) : Buffer.alloc(0);
+    if (
+      actualProof.length !== Buffer.byteLength(expectedProof) ||
+      !timingSafeEqual(actualProof, Buffer.from(expectedProof))
+    ) {
+      throw new UnauthorizedException('Invalid access token');
+    }
 
     return true;
   }

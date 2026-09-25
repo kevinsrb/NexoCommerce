@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { ConflictException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
@@ -106,9 +106,19 @@ export class AuthService {
 
   private async issueTokens(user: User, database: Pick<Prisma.TransactionClient, 'refreshToken'>) {
     const id = randomUUID();
+    const adminProof = user.role === 'ADMIN'
+      ? createHmac('sha256', this.environment.CATALOG_ADMIN_SECRET)
+          .update(`${user.id}:ADMIN`)
+          .digest('base64url')
+      : undefined;
     const [accessToken, refreshToken] = await Promise.all([
       this.jwt.signAsync(
-         { sub: user.id, type: 'access', role: user.role },
+        {
+          sub: user.id,
+          type: 'access',
+          role: user.role,
+          ...(adminProof === undefined ? {} : { adminProof }),
+        },
         {
           secret: this.environment.JWT_ACCESS_SECRET,
           algorithm: 'HS256',

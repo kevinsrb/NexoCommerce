@@ -23,6 +23,7 @@ describe('Auth HTTP boundary', () => {
           DATABASE_URL: 'postgresql://nexo:password@localhost:5432/auth_db',
           JWT_ACCESS_SECRET: 'access-secret-at-least-thirty-two-characters',
           JWT_REFRESH_SECRET: 'refresh-secret-at-least-thirty-two-characters',
+          CATALOG_ADMIN_SECRET: 'catalog-admin-secret-at-least-thirty-two',
         }),
       )
       .compile();

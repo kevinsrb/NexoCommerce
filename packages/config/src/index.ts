@@ -26,12 +26,14 @@ export const authEnvironmentSchema = baseEnvironmentSchema.extend({
   DATABASE_URL: z.string().url(),
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
+  CATALOG_ADMIN_SECRET: z.string().min(32),
 });
 
 export const catalogEnvironmentSchema = baseEnvironmentSchema.extend({
   DATABASE_URL: z.string().url(),
   JWT_ACCESS_SECRET: z.string().min(32),
   CATALOG_INTERNAL_TOKEN: z.string().min(32),
+  CATALOG_ADMIN_SECRET: z.string().min(32),
 });
 
 export const gatewayEnvironmentSchema = baseEnvironmentSchema.extend({
