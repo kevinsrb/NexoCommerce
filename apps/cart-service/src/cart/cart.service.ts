@@ -130,14 +130,18 @@ export class CartService {
     let total = new Money(0);
     let itemCount = 0;
     const items = cart.items.map(({ variantId, quantity }) => {
-      const variant = this.variant(variants, variantId);
+      const variant = variants.find((candidate) => candidate.id === variantId);
+      itemCount += quantity;
+      if (!variant) {
+        return { variantId, quantity, available: false, subtotal: '0.00' };
+      }
       if (variant.currency !== cart.currency)
         throw new CartDomainException('CART_CURRENCY_MISMATCH', 'Cart currency mismatch', 409);
       const subtotal = new Money(variant.price).times(quantity);
       total = total.plus(subtotal);
-      itemCount += quantity;
       return {
         variantId,
+        available: true,
         productId: variant.productId,
         productName: variant.productName,
         variantName: variant.variantName,

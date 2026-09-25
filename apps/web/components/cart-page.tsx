@@ -13,10 +13,12 @@ function CartLine({ item }: { item: CartItem }) {
   return <li className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h2 className="text-lg font-semibold">{item.productName}</h2>
-        <p className="mt-1 text-sm text-slate-400">{item.variantName} · {item.currency} {item.price} each</p>
+        <h2 className="text-lg font-semibold">{item.available ? item.productName : 'Unavailable item'}</h2>
+        <p className="mt-1 text-sm text-slate-400">
+          {item.available ? `${item.variantName} · ${item.currency} ${item.price} each` : `Variant ${item.variantId} is no longer available.`}
+        </p>
       </div>
-      <p>{item.currency} {item.subtotal}</p>
+      <p>{item.available ? `${item.currency} ${item.subtotal}` : 'Not priced'}</p>
     </div>
     <form className="mt-5 flex flex-wrap items-end gap-3" onSubmit={(event) => {
       event.preventDefault();
@@ -27,7 +29,7 @@ function CartLine({ item }: { item: CartItem }) {
         <input className="w-24 rounded-lg border border-white/20 bg-slate-950 px-3 py-2 text-white" type="number" min="1" step="1" max={Number.MAX_SAFE_INTEGER} required value={quantity} disabled={pending} onChange={(event) => setQuantity(event.target.value)} />
       </label>
       <button className="cart-button" type="submit" aria-label={`Update ${item.productName} quantity`} disabled={pending || !validQuantity}>Update</button>
-      <button className="cart-button" type="button" aria-label={`Remove ${item.productName}`} disabled={pending} onClick={() => void remove(item.variantId)}>Remove</button>
+       <button className="cart-button" type="button" aria-label={`Remove ${item.available ? item.productName : 'unavailable item'}`} disabled={pending} onClick={() => void remove(item.variantId)}>Remove</button>
     </form>
   </li>;
 }

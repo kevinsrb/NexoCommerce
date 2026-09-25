@@ -60,9 +60,10 @@ describe('Cart domain through real service, repository and HTTP', () => {
       total: '0.20',
       itemCount: 2,
       items: [
-        {
-          variantId,
-          productId: userId,
+         {
+           variantId,
+          available: true,
+           productId: userId,
           productName: 'Product',
           variantName: 'Variant',
           price: '0.10',
@@ -198,6 +199,21 @@ describe('Cart domain through real service, repository and HTTP', () => {
     expect(h.writes).toHaveLength(2);
     expect(h.calls).toHaveLength(3);
     expect(h.calls[2].ids).toEqual([variantId, otherId]);
+  });
+
+  it('keeps a deleted Catalog variant visible as an unavailable zero-total line', async () => {
+    await add().expect(201);
+    h.variants = [];
+
+    const response = await get().expect(200);
+    expect(response.body).toEqual({
+      currency: 'USD',
+      items: [{ variantId, quantity: 1, available: false, subtotal: '0.00' }],
+      total: '0.00',
+      itemCount: 1,
+    });
+    await remove(variantId).expect(204);
+    expect((await get().expect(200)).body).toEqual(emptyCart);
   });
 
   it('fails closed on current currency drift until the incompatible item is removed without Catalog', async () => {

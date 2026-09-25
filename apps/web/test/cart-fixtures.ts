@@ -3,7 +3,7 @@ export const emptyCart = { currency: null, items: [], total: '0.00', itemCount: 
 export const filledCart = {
   currency: 'USD', total: '128.00', itemCount: 1,
   items: [{
-    variantId, productId: '3076e554-7586-4deb-b2c9-8e4e29e041d8',
+    variantId, available: true, productId: '3076e554-7586-4deb-b2c9-8e4e29e041d8',
     productName: 'Gateway Lamp', variantName: 'Standard', price: '128.00',
     currency: 'USD', stock: 4, productActive: true, variantActive: true,
     quantity: 1, subtotal: '128.00',

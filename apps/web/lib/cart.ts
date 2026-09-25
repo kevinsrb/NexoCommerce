@@ -2,14 +2,15 @@ import { publicGatewayUrl } from './catalog';
 
 export type CartItem = {
   variantId: string;
-  productId: string;
-  productName: string;
-  variantName: string;
-  price: string;
-  currency: string;
-  stock: number;
-  productActive: boolean;
-  variantActive: boolean;
+  available: boolean;
+  productId?: string;
+  productName?: string;
+  variantName?: string;
+  price?: string;
+  currency?: string;
+  stock?: number;
+  productActive?: boolean;
+  variantActive?: boolean;
   quantity: number;
   subtotal: string;
 };
