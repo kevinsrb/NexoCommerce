@@ -108,7 +108,7 @@ export class AuthService {
     const id = randomUUID();
     const [accessToken, refreshToken] = await Promise.all([
       this.jwt.signAsync(
-        { sub: user.id, type: 'access' },
+         { sub: user.id, type: 'access', role: user.role },
         {
           secret: this.environment.JWT_ACCESS_SECRET,
           algorithm: 'HS256',

@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { JwtService } from '@nestjs/jwt';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -15,6 +16,13 @@ const inactiveProductVariantId = '550e8400-e29b-41d4-a716-446655440003';
 const inactiveVariantId = '550e8400-e29b-41d4-a716-446655440004';
 const unknownVariantId = '550e8400-e29b-41d4-a716-446655440005';
 const timestamp = new Date('2026-09-07T00:00:00Z');
+const accessSecret = 'access-secret-for-catalog-tests-at-least-32-characters';
+const jwt = new JwtService();
+const token = (role: 'CUSTOMER' | 'ADMIN') =>
+  jwt.sign(
+    { sub: '550e8400-e29b-41d4-a716-446655440099', type: 'access', role },
+    { secret: accessSecret, expiresIn: '5m' },
+  );
 const category = {
   id: categoryId,
   name: 'Coffee',
@@ -127,6 +135,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
       .useValue(
         parseEnvironment({
           DATABASE_URL: 'postgresql://nexo:nexo_local_password@localhost:5432/catalog_db',
+          JWT_ACCESS_SECRET: accessSecret,
           NODE_ENV: 'test',
         }),
       )
@@ -142,9 +151,32 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     jest.resetAllMocks();
   });
 
+  it.each([
+    ['anonymous', undefined, 401],
+    ['customer', token('CUSTOMER'), 403],
+  ])('protects Catalog administration for %s', async (_label, authorization, status) => {
+    const requestBuilder = request(app.getHttpServer()).post('/products').send(input);
+    if (authorization) requestBuilder.set('Authorization', `Bearer ${authorization}`);
+    await requestBuilder.expect(status);
+    expect(prisma.product.create).not.toHaveBeenCalled();
+  });
+
+  it('allows an ADMIN access token to administer Catalog', async () => {
+    prisma.product.create.mockResolvedValue(row);
+    await request(app.getHttpServer())
+      .post('/products')
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
+      .send(input)
+      .expect(201);
+  });
+
   it('creates a product and nested variants without losing decimal precision or exposing persistence fields', async () => {
     prisma.product.create.mockResolvedValue(row);
-    const response = await request(app.getHttpServer()).post('/products').send(input).expect(201);
+    const response = await request(app.getHttpServer())
+      .post('/products')
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
+      .send(input)
+      .expect(201);
     expect(response.body).toEqual(publicProduct);
     const data = prisma.product.create.mock.calls[0][0].data;
     expect(data.category.connect).toEqual({ id: categoryId });
@@ -207,6 +239,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     prisma.product.update.mockResolvedValue({ ...row, name: 'New name', active: false });
     const response = await request(app.getHttpServer())
       .patch(`/products/${productId}`)
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .send({ name: 'New name', active: false })
       .expect(200);
     expect(response.body).toEqual({ ...publicProduct, name: 'New name', active: false });
@@ -218,6 +251,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     prisma.product.update.mockResolvedValue(row);
     await request(app.getHttpServer())
       .patch(`/products/${productId}`)
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .send({ variants: input.variants })
       .expect(200);
     const variants = prisma.product.update.mock.calls[0][0].data.variants;
@@ -232,6 +266,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
       (
         await request(app.getHttpServer())
           .post('/categories')
+          .set('Authorization', `Bearer ${token('ADMIN')}`)
           .send({ name: 'Coffee', slug: 'coffee' })
           .expect(201)
       ).body,
@@ -316,6 +351,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
   ])('rejects invalid variant input before persistence: %j', async (variant) => {
     await request(app.getHttpServer())
       .post('/products')
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .send({ ...input, variants: [{ ...input.variants[0], ...variant }] })
       .expect(400);
     expect(prisma.product.create).not.toHaveBeenCalled();
@@ -332,6 +368,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
   ])('rejects invalid product input: %j', async (override) => {
     await request(app.getHttpServer())
       .post('/products')
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .send({ ...input, ...override })
       .expect(400);
     expect(prisma.product.create).not.toHaveBeenCalled();
@@ -340,6 +377,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
   it('rejects nested variant arrays before persistence when creating a product', async () => {
     await request(app.getHttpServer())
       .post('/products')
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .send({ ...input, variants: [[]] })
       .expect(400);
     expect(prisma.product.create).not.toHaveBeenCalled();
@@ -348,6 +386,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
   it('rejects nested variant arrays before persistence when patching a product', async () => {
     await request(app.getHttpServer())
       .patch(`/products/${productId}`)
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .send({ variants: [[]] })
       .expect(400);
     expect(prisma.product.update).not.toHaveBeenCalled();
@@ -356,18 +395,25 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
   it('rejects invalid patches, IDs, pagination, and category fields before persistence', async () => {
     await request(app.getHttpServer())
       .patch('/products/not-a-uuid')
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .send({ active: false })
       .expect(400);
     await request(app.getHttpServer())
       .patch(`/products/${productId}`)
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .send({ name: null })
       .expect(400);
-    await request(app.getHttpServer()).patch(`/products/${productId}`).send({}).expect(400);
+    await request(app.getHttpServer())
+      .patch(`/products/${productId}`)
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
+      .send({})
+      .expect(400);
     await request(app.getHttpServer()).get('/products?limit=101').expect(400);
     await request(app.getHttpServer()).get('/products?offset=-1').expect(400);
     await request(app.getHttpServer()).get('/products?unexpected=1').expect(400);
     await request(app.getHttpServer())
       .post('/categories')
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .send({ name: 'Coffee', slug: 'Bad Slug' })
       .expect(400);
     expect(prisma.product.update).not.toHaveBeenCalled();
@@ -388,6 +434,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     );
     const response = await request(app.getHttpServer())
       .post('/products')
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .send(input)
       .expect(statusCode as number);
     expect(response.body.code).toBe(errorCode);
@@ -401,6 +448,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     expect(failure.body.message).toBe('Internal server error');
     const malformed = await request(app.getHttpServer())
       .post('/products')
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .set('content-type', 'application/json')
       .send('{"price":')
       .expect(400);
@@ -411,6 +459,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
   it('returns a safe 413 error for an oversized JSON request body', async () => {
     const response = await request(app.getHttpServer())
       .post('/products')
+      .set('Authorization', `Bearer ${token('ADMIN')}`)
       .set('x-request-id', productId)
       .send({ ...input, description: 'x'.repeat(110_000) })
       .expect(413);

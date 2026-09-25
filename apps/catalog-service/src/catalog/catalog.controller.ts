@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import {
   CreateCategoryDto,
   CreateProductDto,
@@ -7,6 +7,7 @@ import {
   UpdateProductDto,
 } from './catalog.dto';
 import { CatalogService } from './catalog.service';
+import { AdminGuard } from '../auth/admin.guard';
 
 @Controller()
 export class CatalogController {
@@ -34,16 +35,19 @@ export class CatalogController {
 
   // Temporary Phase 1 administration: distributed authorization is deferred.
   @Post('products')
+  @UseGuards(AdminGuard)
   createProduct(@Body() dto: CreateProductDto) {
     return this.catalog.createProduct(dto);
   }
 
   @Patch('products/:id')
+  @UseGuards(AdminGuard)
   updateProduct(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateProductDto) {
     return this.catalog.updateProduct(id, dto);
   }
 
   @Post('categories')
+  @UseGuards(AdminGuard)
   createCategory(@Body() dto: CreateCategoryDto) {
     return this.catalog.createCategory(dto);
   }

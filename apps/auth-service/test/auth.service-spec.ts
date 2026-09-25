@@ -71,6 +71,7 @@ describe('AuthService security', () => {
     });
     const claims = jwt.verify(result.accessToken, { secret: environment.JWT_ACCESS_SECRET });
     expect(claims.sub).toBe(user.id);
+    expect(claims.role).toBe('CUSTOMER');
     const refresh = prisma.refreshToken.create.mock.calls[0]?.[0].data;
     expect(refresh.tokenHash).not.toBe(result.refreshToken);
     expect(await argon2.verify(refresh.tokenHash, result.refreshToken)).toBe(true);

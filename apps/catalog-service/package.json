@@ -16,6 +16,7 @@
   "dependencies": {
     "@nestjs/common": "11.2.3",
     "@nestjs/core": "11.2.3",
+    "@nestjs/jwt": "11.0.0",
     "@nestjs/platform-express": "11.2.3",
     "@nexo/config": "workspace:*",
     "@nexo/contracts": "workspace:*",
