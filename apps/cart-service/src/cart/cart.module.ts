@@ -12,7 +12,7 @@ export const CART_REDIS_CLIENT = Symbol('CART_REDIS_CLIENT');
 const logger = createLogger('cart-service');
 
 export const createCartRedisClient = (url: string): CartRedisClient => {
-  const client = createClient({ url });
+  const client = createClient({ url, disableOfflineQueue: true });
   client.on('error', () => logger.error({ event: 'redis_error' }, 'Redis client error'));
   return client as CartRedisClient;
 };

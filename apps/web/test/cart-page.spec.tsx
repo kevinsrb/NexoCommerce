@@ -109,9 +109,29 @@ describe('Storefront cart flow', () => {
     ]);
     renderCart();
     expect(await screen.findByRole('alert')).toHaveTextContent('Service unavailable');
+    expect(screen.queryByRole('button', { name: /clear cart/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /retry cart/i }));
     expect(await screen.findByRole('heading', { name: 'Gateway Lamp' })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('clears an initially unreadable cart after a currency mismatch and refreshes through Gateway', async () => {
+    const transport = jest.fn(gatewayFetch([
+      { path: '/cart', response: jsonResponse({ statusCode: 409, code: 'CART_CURRENCY_MISMATCH', message: 'Cart currency mismatch', requestId: 'currency-mismatch' }, 409) },
+      { path: '/cart', method: 'DELETE', response: jsonResponse(undefined, 204) },
+      { path: '/cart', response: jsonResponse(emptyCart) },
+    ]));
+    global.fetch = transport;
+    renderCart();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Cart currency mismatch');
+    expect(screen.queryByRole('heading', { name: /your cart is empty/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /clear cart/i }));
+
+    expect(await screen.findByRole('heading', { name: /your cart is empty/i })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /cart.*0/i })).toBeInTheDocument();
+    expect(transport).toHaveBeenCalledTimes(3);
   });
 
   it.each(['missing', 'expired'])('shows an actionable sign-in error for a %s token', async (state) => {

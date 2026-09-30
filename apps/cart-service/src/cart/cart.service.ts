@@ -110,6 +110,7 @@ export class CartService {
       currency: expectedCurrency,
       stock: variant.stock,
       updatedAt: snapshot.updatedAt,
+      validatedIds: items.map((item) => item.variantId),
     });
     if (result === -2)
       throw new CartDomainException('CART_CURRENCY_MISMATCH', 'Cart currency mismatch', 409);
@@ -119,7 +120,10 @@ export class CartService {
       throw new CartDomainException('CART_ITEM_NOT_FOUND', 'Cart item not found', 404);
     if (result === -5)
       throw new BadRequestException('Cart supports at most 100 distinct variants');
-    return this.getCart(userId, requestId);
+    if (result === -6)
+      throw new CartDomainException('CART_CONCURRENT_MODIFICATION', 'Cart changed; please retry', 409);
+    if (typeof result === 'number') throw new Error('Invalid cart mutation result');
+    return this.response(result, variants);
   }
 
   private variant(variants: InternalCatalogVariant[], id: string): InternalCatalogVariant {

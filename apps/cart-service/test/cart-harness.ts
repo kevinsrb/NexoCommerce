@@ -34,6 +34,8 @@ export class CartHarness {
   mode: 'ok' | 'status' | 'json' | 'shape' | 'row' | 'interrupted' | 'timeout' | 'body-timeout' =
     'ok';
   storageFailure = false;
+  beforeMutation?: () => void;
+  afterMutation?: () => void;
   variants: InternalCatalogVariant[] = [];
   reset(): void {
     this.values.clear();
@@ -42,6 +44,8 @@ export class CartHarness {
     this.calls = [];
     this.mode = 'ok';
     this.storageFailure = false;
+    this.beforeMutation = undefined;
+    this.afterMutation = undefined;
     this.variants = [variantId, otherId].map((id) => ({
       id,
       productId: userId,
@@ -149,7 +153,8 @@ export class CartHarness {
         },
         eval: async (_script: string, options: { keys: string[]; arguments: string[] }) => {
           if (this.storageFailure) throw new Error('private redis failure');
-          const [operation, variantId, quantityValue, currency, stockValue, ttlValue, updatedAt] = options.arguments;
+          this.beforeMutation?.();
+          const [operation, variantId, quantityValue, currency, stockValue, ttlValue, updatedAt, validatedIdsValue] = options.arguments;
           const key = options.keys[0];
           const current = this.values.get(key);
           const cart = current ? JSON.parse(current) as {
@@ -182,6 +187,8 @@ export class CartHarness {
             if (operation !== 'add') return -4;
           } else if (cart.currency !== currency) return -2;
           const next = cart ?? { currency, items: [], updatedAt };
+          const validatedIds = JSON.parse(validatedIdsValue) as string[];
+          if (next.items.some((item) => !validatedIds.includes(item.variantId))) return -6;
           const existing = next.items.find((item) => item.variantId === variantId);
           if (operation === 'update' && !existing) return -4;
           if (operation === 'add') {
@@ -201,7 +208,8 @@ export class CartHarness {
           const value = JSON.stringify(next);
           this.values.set(key, value);
           this.writes.push({ key, value, ttl: Number(ttlValue) });
-          return 1;
+          this.afterMutation?.();
+          return value;
         },
       })
       .compile();

@@ -22,6 +22,49 @@ describe('Cart domain through real service, repository and HTTP', () => {
     expect(h.calls).toEqual([]);
   });
 
+  it.each(['add', 'update'])('returns the confirmed %s without another Catalog request after committing', async (operation) => {
+    h.values.set(`cart:${userId}`, JSON.stringify({
+      currency: 'USD', items: [{ variantId, quantity: 1 }, { variantId: otherId, quantity: 1 }],
+      updatedAt: '2026-09-13T00:00:00.000Z',
+    }));
+    h.beforeMutation = () => {
+      h.values.set(`cart:${userId}`, JSON.stringify({
+        currency: 'USD', items: [{ variantId, quantity: 1 }, { variantId: otherId, quantity: 3 }],
+        updatedAt: '2026-09-13T00:00:01.000Z',
+      }));
+    };
+    // A second Catalog request would now fail, after Redis already committed.
+    h.afterMutation = () => { h.mode = 'status'; };
+
+    const response = await (operation === 'add' ? add(variantId, 1) : patch(variantId, 2));
+
+    expect(response.status).toBe(operation === 'add' ? 201 : 200);
+    expect(response.body).toMatchObject({ currency: 'USD', total: '0.50', itemCount: 5 });
+    expect(response.body.items).toEqual([
+      expect.objectContaining({ variantId, quantity: 2, subtotal: '0.20' }),
+      expect.objectContaining({ variantId: otherId, quantity: 3, subtotal: '0.30' }),
+    ]);
+    expect(h.stored()).toMatchObject({ items: [{ variantId, quantity: 2 }, { variantId: otherId, quantity: 3 }] });
+    expect(h.calls.map((call) => call.ids)).toEqual([[variantId, otherId]]);
+    expect(h.writes).toHaveLength(1);
+  });
+
+  it('rejects a concurrently introduced variant before mutation when it was not in the Catalog batch', async () => {
+    const concurrent = JSON.stringify({
+      currency: 'USD', items: [{ variantId: otherId, quantity: 3 }],
+      updatedAt: '2026-09-13T00:00:00.000Z',
+    });
+    h.beforeMutation = () => { h.values.set(`cart:${userId}`, concurrent); };
+
+    const response = await add();
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('CART_CONCURRENT_MODIFICATION');
+    expect(h.values.get(`cart:${userId}`)).toBe(concurrent);
+    expect(h.calls.map((call) => call.ids)).toEqual([[variantId]]);
+    expect(h.writes).toEqual([]);
+  });
+
   it('allows the hundredth distinct variant but rejects a hundred-and-first without changing Redis or calling Catalog', async () => {
     const fixture = h.variants[0];
     h.variants = Array.from({ length: 101 }, (_, index) => ({
@@ -40,7 +83,7 @@ describe('Cart domain through real service, repository and HTTP', () => {
     const before = h.values.get(`cart:${userId}`);
     expect((await add(h.variants[100].id).expect(400)).body.code).toBe('BAD_REQUEST');
     expect(h.values.get(`cart:${userId}`)).toBe(before);
-    expect(h.calls).toHaveLength(2);
+    expect(h.calls).toHaveLength(1);
     expect(h.writes).toHaveLength(1);
     expect((await add(h.variants[0].id).expect(201)).body.itemCount).toBe(101);
   });
@@ -92,7 +135,7 @@ describe('Cart domain through real service, repository and HTTP', () => {
     expect(response.body.items[0].quantity).toBe(5);
     expect(response.body.total).toBe('0.50');
     expect(h.writes.map((write) => write.ttl)).toEqual([2592000, 2592000]);
-    expect(h.calls.map((call) => call.ids)).toEqual([[variantId], [variantId], [variantId], [variantId]]);
+    expect(h.calls.map((call) => call.ids)).toEqual([[variantId], [variantId]]);
   });
 
   it('serializes concurrent adds without losing either quantity', async () => {
@@ -120,7 +163,7 @@ describe('Cart domain through real service, repository and HTTP', () => {
     expect(response.body.items).toHaveLength(1);
     expect(response.body.items[0]).toMatchObject({ variantId, quantity: 5 });
     expect(h.stored()).toMatchObject({ items: [{ variantId, quantity: 5 }] });
-    expect(h.calls.map((call) => call.ids)).toEqual([[variantId], [variantId], [variantId], [variantId]]);
+    expect(h.calls.map((call) => call.ids)).toEqual([[variantId], [variantId]]);
   });
 
   it('updates an existing line using an uppercase PATCH variant UUID', async () => {
@@ -129,7 +172,7 @@ describe('Cart domain through real service, repository and HTTP', () => {
     expect(response.body.items).toHaveLength(1);
     expect(response.body.items[0]).toMatchObject({ variantId, quantity: 4 });
     expect(h.stored()).toMatchObject({ items: [{ variantId, quantity: 4 }] });
-    expect(h.calls.map((call) => call.ids)).toEqual([[variantId], [variantId], [variantId], [variantId]]);
+    expect(h.calls.map((call) => call.ids)).toEqual([[variantId], [variantId]]);
   });
 
   it('removes an existing line using an uppercase DELETE variant UUID', async () => {
@@ -137,7 +180,7 @@ describe('Cart domain through real service, repository and HTTP', () => {
     await remove(variantId.toUpperCase()).expect(204);
     expect(h.stored()).toBeNull();
     expect((await get().expect(200)).body).toEqual(emptyCart);
-    expect(h.calls).toHaveLength(2);
+    expect(h.calls).toHaveLength(1);
   });
 
   it.each([
@@ -197,8 +240,8 @@ describe('Cart domain through real service, repository and HTTP', () => {
       variantActive: false,
     });
     expect(h.writes).toHaveLength(2);
-    expect(h.calls).toHaveLength(5);
-    expect(h.calls[4].ids).toEqual([variantId, otherId]);
+    expect(h.calls).toHaveLength(3);
+    expect(h.calls[2].ids).toEqual([variantId, otherId]);
   });
 
   it('keeps a deleted Catalog variant visible as an unavailable zero-total line', async () => {
@@ -223,7 +266,7 @@ describe('Cart domain through real service, repository and HTTP', () => {
     expect((await get().expect(409)).body.code).toBe('CART_CURRENCY_MISMATCH');
     h.mode = 'status';
     await remove(variantId).expect(204);
-    expect(h.calls).toHaveLength(5);
+    expect(h.calls).toHaveLength(3);
     h.mode = 'ok';
     expect((await get().expect(200)).body).toMatchObject({
       currency: 'USD',
@@ -253,7 +296,7 @@ describe('Cart domain through real service, repository and HTTP', () => {
     await clear().expect(204);
     await clear().expect(204);
     await remove(missingId).expect(204);
-    expect(h.calls).toHaveLength(2);
+    expect(h.calls).toHaveLength(1);
     expect(h.stored()).toBeNull();
     h.mode = 'ok';
     h.variants[1].currency = 'EUR';

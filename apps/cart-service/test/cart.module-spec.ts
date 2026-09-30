@@ -15,6 +15,7 @@ describe('Cart Redis client', () => {
     mockCreateClient.mockReturnValue(client);
 
     expect(createCartRedisClient('redis://localhost:6379')).toBe(client);
+    expect(mockCreateClient).toHaveBeenCalledWith({ url: 'redis://localhost:6379', disableOfflineQueue: true });
     expect(client.on).toHaveBeenCalledWith('error', expect.any(Function));
     expect(() => listeners.error(new Error('redis://private-host:6379'))).not.toThrow();
   });

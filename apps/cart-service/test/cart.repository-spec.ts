@@ -78,7 +78,11 @@ describe('CartRepository', () => {
   });
 
   it('uses the atomic mutation script with the thirty-day TTL', async () => {
-    redis.eval.mockResolvedValue(1);
+    const committed = {
+      currency: 'USD', items: [{ variantId: 'variant-1', quantity: 3 }],
+      updatedAt: '2026-09-13T00:00:00.000Z',
+    };
+    redis.eval.mockResolvedValue(JSON.stringify(committed));
 
     await expect(repository.mutateCart(userId, {
       operation: 'add',
@@ -87,11 +91,12 @@ describe('CartRepository', () => {
       currency: 'USD',
       stock: 5,
       updatedAt: '2026-09-13T00:00:00.000Z',
-    })).resolves.toBe(1);
+      validatedIds: ['variant-1'],
+    })).resolves.toEqual(committed);
 
     expect(redis.eval).toHaveBeenCalledWith(expect.any(String), {
       keys: [`cart:${userId}`],
-      arguments: ['add', 'variant-1', '2', 'USD', '5', '2592000', '2026-09-13T00:00:00.000Z'],
+      arguments: ['add', 'variant-1', '2', 'USD', '5', '2592000', '2026-09-13T00:00:00.000Z', '["variant-1"]'],
     });
   });
 

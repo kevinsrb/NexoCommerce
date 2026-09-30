@@ -39,7 +39,7 @@ Cart calls Catalog's private `POST /internal/variants/batch` endpoint with up to
 
 Catalog returns a narrow projection containing variant/product IDs, names, decimal-string price, currency, stock, and both active flags. Missing variants are absent from the result and are returned by Cart as `available: false` lines with zero subtotal so users can remove them. Transport failures, timeouts, non-success responses, malformed JSON, and interrupted bodies become `503 CATALOG_UNAVAILABLE`.
 
-Cart validates every mutation against current Catalog state. It does not import Catalog Prisma code, access `catalog_db`, reserve inventory, or decrement stock.
+Cart validates adds and quantity updates against one current Catalog batch before writing. Their responses enrich the exact state returned by the atomic Redis mutation with that same batch, so a later Catalog outage cannot turn a committed write into a failed response. Removes and clears do not require Catalog. Cart does not import Catalog Prisma code, access `catalog_db`, reserve inventory, or decrement stock.
 
 ## Redis lifecycle
 
@@ -57,11 +57,13 @@ Each save uses `EX 2592000` (30 days). Adds, quantity replacements, and item rem
 
 Cart add, update, remove, and clear mutations use one Redis Lua script per operation, making each state transition atomic for a user key while preserving the TTL rule. Redis operational failures return `503 CART_STORAGE_UNAVAILABLE` and are logged with the request ID without Redis connection details.
 
+If another writer introduces a variant outside the validated batch before an add or update commits, the script rejects it without writing with `409 CART_CONCURRENT_MODIFICATION`; the caller can retry. Concurrent quantity changes and removals of other lines are reflected in the committed response. Disconnected Redis commands fail without offline queueing, so reconnecting does not replay deferred cart mutations.
+
 The first current Catalog variant establishes the Cart currency. A later incompatible currency returns `409 CART_CURRENCY_MISMATCH` and leaves Redis unchanged. A currency change in Catalog for an existing line also fails closed until that line is removed.
 
 ## Frontend boundary
 
-The storefront uses only `NEXT_PUBLIC_API_GATEWAY_URL` and the existing `localStorage` key `nexo.access-token`. The home page selects the first active product variant for Add to Cart. `/cart` renders loading, empty, error, update, remove, and clear states. Missing or expired tokens render an actionable sign-in error; Phase 2 does not add a sign-in UI.
+The storefront uses only `NEXT_PUBLIC_API_GATEWAY_URL` and the existing `localStorage` key `nexo.access-token`. The home page selects the first active product variant for Add to Cart. `/cart` renders loading, empty, error, update, remove, and clear states. An initial `CART_CURRENCY_MISMATCH` exposes Clear cart even without a loaded cart; it deletes through the Gateway and refreshes the empty cart. Missing or expired tokens render an actionable sign-in error; Phase 2 does not add a sign-in UI.
 
 Cart responses use current Catalog prices and decimal-string subtotal/total calculations. Cart prices are not commitments; a future Order flow must snapshot its own prices.
 

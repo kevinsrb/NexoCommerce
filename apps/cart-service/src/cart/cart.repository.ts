@@ -42,8 +42,8 @@ export interface CartRedisClient {
 }
 
 export type CartMutation =
-  | { operation: 'add'; variantId: string; quantity: number; currency: string; stock: number; updatedAt: string }
-  | { operation: 'update'; variantId: string; quantity: number; currency: string; stock: number; updatedAt: string }
+  | { operation: 'add'; variantId: string; quantity: number; currency: string; stock: number; updatedAt: string; validatedIds: string[] }
+  | { operation: 'update'; variantId: string; quantity: number; currency: string; stock: number; updatedAt: string; validatedIds: string[] }
   | { operation: 'remove'; variantId: string; updatedAt: string }
   | { operation: 'clear' };
 
@@ -92,6 +92,13 @@ elseif cart.currency ~= currency then
   return -2
 end
 
+-- Every committed line must be covered by the single pre-mutation Catalog batch.
+local validatedIds = {}
+for _, id in ipairs(cjson.decode(ARGV[8])) do validatedIds[id] = true end
+for _, item in ipairs(cart.items) do
+  if not validatedIds[item.variantId] then return -6 end
+end
+
 local found = false
 for _, item in ipairs(cart.items) do
   if item.variantId == variantId then
@@ -113,8 +120,9 @@ if operation == 'add' and not found then
   table.insert(cart.items, { variantId = variantId, quantity = quantity })
 end
 cart.updatedAt = updatedAt
-redis.call('SET', key, cjson.encode(cart), 'EX', ttl)
-return 1
+local persisted = cjson.encode(cart)
+redis.call('SET', key, persisted, 'EX', ttl)
+return persisted
 `;
 
 @Injectable()
@@ -167,7 +175,7 @@ export class CartRepository implements OnApplicationBootstrap, OnApplicationShut
     }
   }
 
-  async mutateCart(userId: string, mutation: CartMutation): Promise<number> {
+  async mutateCart(userId: string, mutation: CartMutation): Promise<PersistedCart | number> {
     const args = mutation.operation === 'clear'
       ? ['clear', '', '0', '', '0', '0', '']
       : mutation.operation === 'remove'
@@ -180,12 +188,17 @@ export class CartRepository implements OnApplicationBootstrap, OnApplicationShut
             String(mutation.stock),
             '2592000',
             mutation.updatedAt,
+            JSON.stringify(mutation.validatedIds),
           ];
     try {
-      return Number(await this.redis.eval(CART_MUTATION_SCRIPT, {
+      const result = await this.redis.eval(CART_MUTATION_SCRIPT, {
         keys: [this.key(userId)],
         arguments: args,
-      }));
+      });
+      if (typeof result === 'number') return result;
+      const persisted: unknown = JSON.parse(result as string);
+      if (!isPersistedCart(persisted)) throw new Error('Invalid persisted cart');
+      return persisted;
     } catch {
       throw new CartStorageUnavailableException();
     }
