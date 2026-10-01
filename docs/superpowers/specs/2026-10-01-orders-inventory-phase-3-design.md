@@ -1,100 +1,113 @@
 # Phase 3: Orders and Inventory Design
 
-**Status:** Draft for Sentinel review  
+**Status:** Revised after Sentinel NO-GO
 **Date:** 2026-10-01
 
 ## Scope and non-goals
 
-Phase 3 adds order placement and inventory reservation to the existing NexoCommerce checkout path. It covers the private service contracts, durable order and reservation records, stock safety, retry behavior, and operational rollout.
+Phase 3 adds checkout order records and inventory reservations using the existing principal-scoped Cart and Catalog variant model. Orders durably records checkout intent and the order saga; Catalog alone owns stock and reservation lifecycle.
 
-Non-goals: payments or payment capture, fulfillment/shipping, returns, customer-facing order APIs, inventory receiving/adjustments, product or cart redesign, and distributed transactions across services. Payment authorization, if already present, remains outside the order/inventory transaction and needs an explicit compensation policy before integration.
+Non-goals: payment authorization/capture, tax, discounts, shipping charges, fulfillment, returns, public order management APIs, inventory receiving, and cross-service distributed transactions.
 
-## Current facts and assumptions
+## Current facts and design assumptions
 
-- This work is in the isolated `phase-3-orders` worktree and is a design-only phase here; no runtime implementation or migration is included.
-- The requested system participants are HTTP Gateway, Cart, Catalog, and the new order/inventory capability.
-- No repository-specific service topology, persistence engine, existing schemas, or deployed contract details were supplied for this design. Names and ownership below are recommendations, not claims about current implementation.
-- Gateway is treated as the private service-to-service entry point; direct public access to Cart, Catalog, and Orders is out of scope.
+- Cart is scoped to the authenticated principal; checkout does not accept or depend on a caller-supplied `cart_id`.
+- Cart lines identify Catalog variants with `variantId` and quantity.
+- Catalog prices are decimal strings. Checkout must preserve and calculate those values without JavaScript floating-point arithmetic.
+- This document defines proposed private contract additions for versioned Cart claims and Catalog reservation operations. They must be aligned with the respective service owners before implementation; no existing route names or persistence technology are asserted here.
 
-## Recommended ownership
+## Ownership
 
-Introduce an **Orders service** as the source of truth for order lifecycle, order-line price snapshots, and reservation lifecycle. It owns the Orders and Reservations tables and orchestrates placement. Catalog owns sellable product data and stock quantities; only Catalog may mutate available stock. Cart owns mutable cart contents and does not own checkout prices or stock. Gateway authenticates callers, enforces private routing, propagates request context, and forwards the checkout command.
+- **Gateway** authenticates the end-user JWT, derives the principal identity, enforces the public/private boundary, and forwards trusted identity and trace context.
+- **Cart** owns the current principal-scoped cart and its monotonically increasing version. It atomically claims a version for checkout and prevents edits while that claim is active.
+- **Catalog** is the sole owner of sellable variants, prices, stock quantities, and the complete reservation lifecycle: reserve, release, expiry, and reservation-aware administrative changes.
+- **Orders** owns checkout idempotency/intent, immutable order snapshots, order state, and durable saga progress. It stores Catalog reservation references for recovery, but does not own or mutate reservation state or stock.
 
-Catalog must expose one atomic reserve operation that checks and decrements stock in its own database. Orders calls it per SKU in stable SKU order, then creates order/reservation records. Because there is no cross-service transaction, Orders compensates successful reservations if any later reservation or order write fails. The reservation operation accepts an idempotency key so retries cannot decrement twice. This design favors explicit compensation and reconciliation over pretending a distributed transaction is atomic.
+No cross-service transaction is assumed. Orders persists intent before asking Catalog to reserve, and retries or compensates using stable operation identifiers.
 
-## Checkout flow
+## Checkout flow and duplicate prevention
 
-1. Client submits checkout to Gateway with the cart identifier and an `Idempotency-Key`.
-2. Gateway authenticates the caller and forwards identity, `x-request-id`, and idempotency key to Orders.
-3. Orders loads the cart through Cart, validates ownership and non-empty lines, and requests current authoritative SKU, sellability, and unit-price data from Catalog. Cart-provided prices are ignored.
-4. Orders calculates line totals and grand total using integer minor currency units and a single currency per order. It records immutable item name/SKU, quantity, currency, unit price, and tax/discount amounts where applicable as snapshots.
-5. Orders obtains stock reservations from Catalog for every distinct SKU in deterministic order. Catalog atomically succeeds only when `on_hand - reserved >= requested`; reserve failure returns insufficient stock. Catalog uses a unique reservation token per order/SKU and makes repeated reserve calls with the same token return the original result.
-6. If any reserve fails, Orders releases all reservations already obtained and returns a conflict; no order is accepted. If all succeed, Orders transactionally persists the order, lines, and reservation references in `PENDING` / `ACTIVE` state. A persistence failure triggers release compensation. Failed compensation is retried by a durable reconciliation worker and must alert.
-7. On success, Orders returns the stable order representation. Cart is cleared only after the order is durable; clearing is idempotent and failure is retried without changing order acceptance.
+1. Client sends the checkout request to Gateway with `Authorization: Bearer <JWT>` and a required `Idempotency-Key`; Gateway creates or forwards `x-request-id`.
+2. Orders validates the trusted principal context and atomically inserts/claims a durable checkout attempt before any Catalog reserve call. Uniqueness is enforced for `(principal_id, idempotency_key)`. The attempt records a canonical request hash and stable `checkout_attempt_id`. Same key/hash replays the existing attempt/result; a different hash returns `409 IDEMPOTENCY_KEY_REUSED`.
+3. Orders reads the principal-scoped Cart and receives its current `version` and lines `{variantId, quantity}`. It asks Cart to claim that exact version using `checkout_attempt_id`. Cart atomically permits only one active checkout claim for the principal's current cart version. A repeated claim by the same attempt returns the original claim; a competing claim returns conflict. After successful checkout, Cart finalization clears the cart and advances its version, so a second request holding the old version cannot create another order. A stale version returns conflict. While claimed, cart edits fail with `409 CART_CHECKOUT_IN_PROGRESS`.
+4. Orders retrieves each variant's authoritative current sellability, decimal-string price, and currency from Catalog. It validates quantities and a single currency, then calculates exact line and order totals. The request's cart prices, if any, are ignored.
+5. Orders persists the prepared variant/quantity/price snapshot and `RESERVATION_PENDING` saga state before calling Catalog. It calls Catalog once with the stable attempt ID and complete line set. Catalog atomically reserves all requested variants or none; it returns the same reservation on retries of that attempt.
+6. After Catalog confirms reservation, Orders transactionally writes the order, lines, Catalog reservation reference, and `ORDER_RECORDED` attempt state. The order becomes `PENDING` once the reservation and order record are durable. Orders then finalizes/clears Cart using the same claim and version. Cart finalization is idempotent; failure does not undo the accepted order and is retried.
+7. Insufficient stock or validation failure causes Orders to ask Cart to release the claim and returns a stable error. If reservation outcome is uncertain, Orders does not release the Cart claim or start a new attempt: recovery queries/retries Catalog using the same attempt ID until the outcome is known, then completes or safely compensates.
 
-Use a transactional outbox (or an equivalent durable work queue) for release, cart-clear, and expiry work so process crashes do not lose compensation. Do not hold a database transaction open while making HTTP calls.
+### Durable recovery
 
-## Order and Reservation state machines
+Checkout attempts move through `CLAIMED → CART_CLAIMED → PREPARED → RESERVATION_PENDING → ORDER_RECORDED → COMPLETE`, with `FAILED` as a terminal result only after any Catalog reservation is confirmed released and the Cart claim is released. Attempt state changes use transactional compare-and-set/version checks. A recovery worker scans nonterminal attempts and resumes idempotently:
 
-Order states: `PENDING → CONFIRMED → CANCELLED` and `PENDING → EXPIRED`. `PENDING` is created only after all reservations are acquired. `CONFIRMED` means the order was accepted by this phase; it does not imply payment or fulfillment. Cancellation/expiry is terminal for this phase. State updates use compare-and-set/version checks; invalid transitions return conflict. If payment is later integrated, its pending/authorized/failed states require a separate reviewed extension.
+- Before Cart claim: retry reading and claiming the current Cart version for the same attempt.
+- After Cart claim but before the Orders record contains its result: retry Cart claim with the same attempt ID to retrieve the same claim/version.
+- During/after a Catalog timeout: retry reserve or query reservation status with the same attempt ID; Catalog returns the original outcome rather than reserving twice.
+- After reservation but before order persistence: retry the Orders transaction. If the attempt is deliberately abandoned, release through Catalog and wait for confirmed release before releasing the Cart claim or marking `FAILED`.
+- After order persistence but before Cart finalization: retry Cart finalization without creating another order.
 
-Reservation states: `ACTIVE → RELEASED` or `ACTIVE → CONSUMED`; terminal states do not transition. `CONSUMED` is reserved for a later fulfillment/stock-decrement workflow and is not emitted by Phase 3 checkout. Release is idempotent. A reservation has a server-set expiry deadline; expiry releases active stock and moves a still-pending order to `EXPIRED`. Confirmation policy must be decided before implementation: either confirmation makes the reservation non-expiring, or the order remains pending until a later acceptance step.
+Transient failures remain recoverable and visible; never discard an uncertain attempt or create a new reservation token to bypass it. Alert on attempts exceeding the recovery age threshold.
 
-## Price snapshots
+## Order and checkout state machines
 
-Persist prices as integer minor units plus ISO currency code; never use floating point. Each line stores SKU, display-name snapshot, quantity, unit amount, line subtotal, and applicable tax/discount amounts and source identifiers. The order stores currency, subtotal, tax, discounts, shipping amount if later applicable, and total. Enforce `total = subtotal + tax + shipping - discounts` under a documented rounding rule. Subsequent Catalog price/name changes do not alter existing orders. Reject mixed-currency carts and invalid/negative quantities or amounts.
+Order states: `PENDING → CONFIRMED → CANCELLED`, and `PENDING → EXPIRED`. `CONFIRMED` means checkout/order acceptance only; it does not imply payment or fulfillment. Cancellation/expiry are terminal in this phase. Expiry is driven by Catalog's reservation expiry notification/status; Orders updates its own order state idempotently. Orders does not independently expire or release stock.
 
-## Atomic reservations and oversell prevention
+Checkout attempt states and recovery rules are defined above. Invalid transitions return conflict. All transitions use compare-and-set/version checks.
 
-Catalog performs reserve in a single database transaction using a conditional update (or row lock): decrement `available`/increase `reserved` only when the requested amount is available. The stock invariant is `on_hand >= reserved >= 0` and `available = on_hand - reserved`. Add a uniqueness constraint on `(reservation_token, sku)`; the same token and same quantity replays successfully, while a quantity mismatch is a conflict. Lock/update SKUs in stable order for multi-SKU requests. Never implement read-then-write availability checks in Orders or Cart. Catalog is responsible for ensuring concurrent requests cannot drive availability below zero.
+## Price snapshots and totals
+
+At checkout, Orders snapshots the current authoritative Catalog variant price as an exact decimal string, along with `variantId`, currency, quantity, and exact line total. Phase 3 applies no tax, discounts, or shipping: `order total = sum(line quantity × unit price)` in the same currency. Preserve decimal scale/precision from Catalog and serialize the resulting total as a decimal string. Parse and multiply using an exact decimal or base-10 integer-and-scale implementation; never convert price or total to a JavaScript `Number`. Later Catalog price changes do not rewrite an order snapshot.
+
+## Catalog reservations and oversell prevention
+
+Catalog exposes an atomic batch reserve operation over all order variants. In one Catalog database transaction, it locks or conditionally updates variants in stable `variantId` order, verifies each is sellable and sufficiently available, and creates the reservation only if every line succeeds. Availability must never become negative. A stable unique `checkout_attempt_id` is the idempotency token: same token and same normalized lines returns the original reservation; same token with different lines conflicts. Catalog owns the reservation record and state; Orders persists only the returned reservation identifier/reference and saga progress.
+
+Catalog release is conditional and idempotent: only `ACTIVE → RELEASED` restores availability, exactly once. Repeated release returns the existing terminal state. Expiry performs the same one-time transition. Reservation states are `ACTIVE → RELEASED` or `ACTIVE → EXPIRED`; `CONSUMED` is out of scope because fulfillment is out of scope. Orders cannot directly alter these states.
+
+### Reservation-aware Catalog administration
+
+Administrative stock adjustment must use the same Catalog transaction/locking boundary as reservation. A resulting stock quantity may not be lower than active reserved quantity; reject such an update with a conflict and report available/reserved quantities to authorized operators. Variant deletion/replacement is blocked while active reservations refer to that `variantId`. A replacement receives a new `variantId`; active reservations remain attached to the old immutable variant until released/expired. Do not silently transfer reservations or rewrite order snapshots. Catalog's admin API and schema constraints must enforce these rules even when called outside checkout.
 
 ## Expiry and release
 
-Reservation TTL and expiry worker cadence are configuration, not client inputs. Persist `expires_at` in UTC. A worker claims due active reservations in bounded batches, atomically changes each to released and restores availability once, then emits/records completion. The compare-and-set makes concurrent release, cancellation, and expiry safe. Orders must retry transient release failures with backoff and expose oldest-due age and failure counts. A periodic reconciliation compares active reservation records with Catalog reserved stock and raises discrepancies for repair; automatic repair must be reviewed before enabling.
+Catalog computes `expires_at` from its own configured reservation TTL when it creates the reservation; callers cannot set or override it. Catalog persists the deadline in UTC and runs the expiry worker. The worker conditionally claims due `ACTIVE` reservations, transitions each to `EXPIRED`, restores stock once, and emits a durable event or exposes status for Orders reconciliation. Cancellation/release and expiry race through the same conditional transition, so only one restores stock. Orders consumes expiry/release outcomes idempotently to update its attempt/order record and alerts on stale references or failed reconciliation. Orders may request release but may not expire reservations itself.
 
-## Idempotency
+## Gateway and private HTTP contracts
 
-Require a caller-provided `Idempotency-Key` for checkout. Scope it by authenticated principal and operation. Store key, canonical request hash, status, and resulting order ID under a uniqueness constraint. Same key and same request returns the original in-progress/final result; same key with a different request returns `409 IDEMPOTENCY_KEY_REUSED`. Retain records at least as long as orders remain retryable. Catalog reserve/release operations use stable order-derived tokens and are independently idempotent. Propagate idempotency through Gateway retries; `x-request-id` is for tracing and is not an idempotency key.
+Public Gateway contract: `POST /v1/checkout`, body `{}` (checkout uses the authenticated principal's current Cart). Required headers: `Authorization: Bearer <JWT>` and `Idempotency-Key`; `x-request-id` is optional on ingress and generated by Gateway when absent. Gateway validates JWT signature, issuer, audience, expiration, and not-before; derives principal identity from the verified `(iss, sub)` pair; rejects missing/invalid credentials; ignores/rejects caller-supplied principal or internal identity headers. Gateway forwards to private Orders over workload-authenticated transport and supplies a signed trusted principal context. It forwards the idempotency key and request ID unchanged. JWT claims and principal identity are never accepted from the JSON body.
 
-## Private HTTP contracts and errors
+Proposed private contracts (all require authenticated service-to-service transport and must not be internet-routable):
 
-All routes below are private, versioned service contracts over authenticated service-to-service HTTP. Gateway exposes only the customer checkout route; internal service routes must not be internet-routable.
+- Gateway → Orders: `POST /internal/v1/checkouts`, body `{}`, headers trusted principal context, `Idempotency-Key`, and `x-request-id`. Returns `201` with stable order ID, state, currency, decimal-string total, and line snapshots; an idempotent replay returns the same result/status.
+- Orders → Cart: `GET /internal/v1/cart` returns the authenticated principal's `{version, lines:[{variantId, quantity}]}`. `POST /internal/v1/cart/checkout-claims` with `{checkout_attempt_id, expected_version}` atomically claims the unchanged version; retry by the same attempt returns the same claim. `POST /internal/v1/cart/checkout-claims/{attempt_id}/complete` finalizes/clears idempotently; `DELETE /internal/v1/cart/checkout-claims/{attempt_id}` releases an uncompleted claim idempotently. Every operation is scoped by trusted principal identity.
+- Orders → Catalog: `GET /internal/v1/variants/{variantId}` returns authoritative `{variantId, sellable, price_decimal, currency}`. `POST /internal/v1/reservations` accepts `{checkout_attempt_id, lines:[{variantId, quantity}]}` and atomically reserves all lines; no caller expiry field is accepted. `GET /internal/v1/reservations/by-checkout/{checkout_attempt_id}` returns the idempotent outcome. `DELETE /internal/v1/reservations/by-checkout/{checkout_attempt_id}` requests conditional idempotent release. Catalog emits or exposes durable reservation state changes for expiry/release reconciliation.
 
-- Gateway → Orders: `POST /internal/v1/checkouts`, body `{cart_id}`, headers `Authorization` (caller context), `Idempotency-Key`, `x-request-id`. Returns `201` with order ID, state, currency, totals, and line snapshots, or the stored replay response.
-- Orders → Cart: `GET /internal/v1/carts/{cart_id}` returns cart ID, owner ID, and SKU/quantity lines. `DELETE /internal/v1/carts/{cart_id}/contents` is idempotent and owner-scoped; it runs after durable order creation.
-- Orders → Catalog: `POST /internal/v1/reservations` with `{reservation_token, order_id, sku, quantity, expires_at}`; `DELETE /internal/v1/reservations/{reservation_token}/{sku}` releases idempotently. Catalog responses include reservation state and authoritative item/pricing data only from its product read endpoint, e.g. `GET /internal/v1/products?sku=...`.
-- Orders read path, if needed internally: `GET /internal/v1/orders/{order_id}` returns the persisted order; no customer-facing Orders endpoint is introduced in this phase.
-
-Use a consistent error body: `{code, message, request_id, details?}`. Expected mappings: `400 INVALID_REQUEST` for malformed input; `401 UNAUTHENTICATED`; `403 FORBIDDEN` for ownership/scope failures; `404 CART_NOT_FOUND` or `404 SKU_NOT_FOUND`; `409 INSUFFICIENT_STOCK`, `409 IDEMPOTENCY_KEY_REUSED`, `409 INVALID_STATE_TRANSITION`; `422 CART_EMPTY` or `422 UNSUPPORTED_CURRENCY`; `429 RATE_LIMITED`; `503 DEPENDENCY_UNAVAILABLE` for exhausted transient dependency failures. Never return internal exception details. Gateway preserves these codes and maps unknown upstream failures to a generic `503`.
-
-## Authentication and request tracing
-
-Gateway validates the end-user/session credential and supplies a signed, short-lived internal identity context to Orders. Orders authorizes cart ownership against the authenticated principal, never a caller-supplied owner ID. Service calls use workload identity or mutually authenticated service credentials with least-privilege scopes (`orders:checkout`, `cart:read`, `cart:clear`, `catalog:read`, `catalog:reserve`, `catalog:release`). Reject missing/invalid internal identity and prohibit direct public service access. Gateway creates `x-request-id` if absent, validates length/character set if supplied, and forwards it unchanged through all calls and logs. Do not put credentials, full cart contents, or payment data in logs.
+Use error body `{code, message, request_id, details?}` without internal exception details. Expected codes: `400 INVALID_REQUEST`; `401 UNAUTHENTICATED`; `403 FORBIDDEN`; `404 VARIANT_NOT_FOUND`; `409 IDEMPOTENCY_KEY_REUSED`, `409 CART_VERSION_CHANGED`, `409 CART_CHECKOUT_IN_PROGRESS`, `409 INSUFFICIENT_STOCK`, `409 RESERVATION_LINES_MISMATCH`; `422 CART_EMPTY`, `422 VARIANT_UNSELLABLE`, `422 MIXED_CURRENCY`; `429 RATE_LIMITED`; `503 DEPENDENCY_UNAVAILABLE`. Gateway preserves known codes and maps unknown upstream errors to generic `503`. `x-request-id` is validated/generated at Gateway and propagated through all calls/logs; it is tracing only, never an idempotency token. Do not log JWTs or full cart contents.
 
 ## Schemas and migrations
 
-Recommended Orders schema:
+Orders owns:
 
-- `orders(id, principal_id, cart_id, state, currency, subtotal_minor, tax_minor, discount_minor, total_minor, created_at, updated_at, expires_at, version)`.
-- `order_lines(id, order_id, sku, item_name_snapshot, quantity, unit_minor, subtotal_minor, tax_minor, discount_minor, metadata_snapshot)` with FK to order and positive quantity checks.
-- `order_reservations(id, order_id, sku, catalog_token, quantity, state, expires_at, released_at, consumed_at)` unique on `(order_id, sku)` and `(catalog_token, sku)`.
-- `idempotency_records(principal_id, operation, key, request_hash, status, order_id, response_snapshot, created_at, expires_at)` unique on `(principal_id, operation, key)`.
-- `outbox(id, event_type, aggregate_id, payload, created_at, available_at, attempts, completed_at)` with an index for pending work.
+- `checkout_attempts(id, principal_id, idempotency_key, request_hash, cart_version, cart_claim_ref, state, saga_version, reservation_ref, failure_code, created_at, updated_at)` with unique `(principal_id, idempotency_key)`.
+- `orders(id, checkout_attempt_id, principal_id, cart_version, state, currency, total_decimal, created_at, updated_at, version)` with unique `checkout_attempt_id` and unique `(principal_id, cart_version)` to prevent duplicate accepted orders while allowing a safely failed checkout to be retried.
+- `order_lines(id, order_id, variant_id, quantity, unit_price_decimal, line_total_decimal, currency, variant_snapshot)` with positive-quantity checks and FK to order.
+- `outbox(id, event_type, aggregate_id, payload, created_at, available_at, attempts, completed_at)` for durable recovery/reconciliation work, indexed by pending work.
 
-Catalog schema adds/validates stock `on_hand` and `reserved` (or an equivalent available quantity with safe atomic updates), plus `stock_reservations(token, order_id, sku, quantity, state, expires_at, created_at, released_at)` unique on `(token, sku)`. Add checks for positive quantities and valid state values, FK/indexes, and nonnegative stock constraints where supported. Migrations should be additive and backward-compatible: deploy schema first, backfill/validate stock invariants, deploy Catalog reserve/release support, then Orders. Existing stock must be reconciled before enabling checkout; do not infer reservations from carts.
+Cart owns its monotonically increasing principal-cart version and active checkout claim, enforcing one active claim per version and preventing edits during claim. Releasing a failed attempt's claim permits a later retry of the same unchanged Cart version; successful finalization advances the version. Catalog owns stock and `stock_reservations(checkout_attempt_id, reservation_id, variant_id, quantity, state, expires_at, created_at, updated_at)` with unique checkout attempt/variant constraints, nonnegative availability/reserved checks, and admin operations constrained by active reservations. Orders does not create a competing reservation table or migration in Catalog's database.
+
+Migrations are additive and backward-compatible: add checkout-attempt/order structures; add Cart version/claim support; add Catalog reservation and guarded admin behavior; reconcile stock invariants before enabling reserve; deploy Catalog and Cart support, then Orders and disabled Gateway routing. Do not create cart IDs or convert cart lines to SKU; use the existing principal scope and `variantId` contract.
 
 ## Tests and rollout
 
-Before enabling traffic, cover unit tests for totals/rounding/state transitions; contract tests for Gateway, Cart, Catalog, and error mapping; database tests for uniqueness and conditional stock updates; concurrency tests proving simultaneous checkouts cannot oversell; retry/idempotency tests for timeouts at each call boundary; compensation and expiry tests including worker crashes; and end-to-end tests for success, empty/invalid carts, price change, insufficient stock, duplicate requests, and Cart clear retry.
+Cover exact decimal multiplication/serialization without floating point; intent uniqueness and concurrent idempotency claims; two different keys racing for the same Cart version; stale-version and edit-during-claim behavior; all-or-none concurrent Catalog reserve proving no oversell; idempotent reserve/release/expiry; reservation-aware admin adjustment and variant replacement; crash/timeout recovery at every checkout boundary; confirmed-release-before-claim-release; JWT validation and spoofed identity rejection; contract/error mapping; and end-to-end success, empty cart, unsellable variant, price change, insufficient stock, duplicate request, and Cart finalization retry.
 
-Roll out behind a server-side feature flag by tenant/cohort. Apply additive migrations, reconcile Catalog stock, deploy Catalog APIs and workers disabled, deploy Orders and Gateway routing disabled, then enable for internal users and a small cohort. Monitor checkout success/conflict rates, duplicate replay rates, reservation age, release failures, stock invariant violations, and outbox lag. Expand only after reconciliation and error rates are acceptable; keep a kill switch that disables new checkout while preserving release/expiry workers. Rollback disables traffic first; retain data and schema until all active reservations are released or otherwise resolved.
+Roll out behind a server-side flag by cohort. Apply additive migrations, reconcile Catalog stock and active reservation constraints, deploy Cart claim and Catalog reserve/release/expiry/admin protections with checkout disabled, then deploy Orders and Gateway routing disabled. Enable for internal users and a small cohort. Monitor duplicate/replay rates, checkout-attempt recovery age, active reservation age, release/expiry reconciliation failures, stock invariant violations, and outbox lag. Keep a kill switch for new checkout while Cart-claim recovery and Catalog release/expiry continue. Rollback disables new checkout first; retain schemas and data until all attempts and reservations are resolved.
 
-## Decisions Sentinel must review
+## Sentinel review: resolved technical decisions
 
-1. Confirm whether Orders is a new service and Catalog remains the sole stock owner, and identify the actual service/database boundaries.
-2. Select the authoritative price/tax/discount source, rounding rules, supported currencies, and whether price is revalidated at final acceptance.
-3. Set reservation TTL, expiry cadence, and whether confirmation ends expiry; define behavior if reservation succeeds but Orders persistence or compensation fails.
-4. Approve the compensation/outbox/reconciliation design and the operational owner and repair policy for stock drift.
-5. Confirm whether payment authorization belongs in this phase; if so, specify ordering, timeout handling, void/refund compensation, and the associated state machine.
-6. Validate private route names, identity propagation, workload authentication, error envelope, and caller retry expectations against existing platform conventions.
-7. Confirm actual persistence technology and migration constraints, retention for idempotency records, and cohort/monitoring thresholds before production enablement.
+The following NO-GO findings are resolved by this design: intent is durable and uniquely claimed before Catalog reserve; principal Cart version claims prevent duplicate checkout; Catalog alone owns reservation and stock lifecycle; Catalog admin stock/variant operations respect active reservations; Catalog computes expiry; Gateway has an explicit JWT/header identity contract; prices remain exact decimal strings with no tax/discount/shipping or floating point; contracts use the current principal-scoped Cart and `variantId`.
+
+## Remaining product decisions
+
+1. Choose the customer-visible Catalog reservation TTL and checkout window; Catalog owns enforcement regardless of the selected duration.
+2. Decide whether checkout accepts the latest Catalog price automatically or requires customer reconfirmation when it differs from the price last shown in Cart. The stored order price is always the authoritative Catalog price read during checkout.
+3. Decide whether the post-reservation `PENDING` order is immediately shown as accepted/confirmed in the customer experience, or whether Phase 3 needs a separate explicit customer confirmation step before `CONFIRMED`.
