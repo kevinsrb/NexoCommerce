@@ -9,7 +9,8 @@
     "dev": "ts-node src/main.ts",
     "lint": "eslint src test",
     "test": "jest --runInBand",
-    "typecheck": "tsc -p tsconfig.test.json --noEmit"
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "migrate:keys": "ts-node src/cart/migrate-legacy-carts.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.2.3",
