@@ -43,3 +43,29 @@ export interface CartResponse {
   itemCount: number;
   total: string;
 }
+
+export type OrderState = 'PENDING' | 'EXPIRED';
+
+export interface CheckoutPriceExpectation {
+  variantId: string;
+  price_decimal: string;
+  currency: string;
+}
+
+export interface CheckoutLineSnapshot {
+  variantId: string;
+  quantity: number;
+  unit_price_decimal: string;
+  line_total_decimal: string;
+  currency: string;
+}
+
+export interface CheckoutResponse {
+  orderId: string;
+  state: OrderState;
+  currency: string;
+  total_decimal: string;
+  expiresAt: string;
+  publicationRevision: number;
+  lines: CheckoutLineSnapshot[];
+}

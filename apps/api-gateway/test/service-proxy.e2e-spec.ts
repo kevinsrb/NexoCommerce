@@ -63,6 +63,7 @@ describe('API Gateway service proxy', () => {
   const originalAuthServiceUrl = process.env.AUTH_SERVICE_URL;
   const originalCatalogServiceUrl = process.env.CATALOG_SERVICE_URL;
   const originalCartServiceUrl = process.env.CART_SERVICE_URL;
+  const originalOrdersServiceUrl = process.env.ORDERS_SERVICE_URL;
 
   beforeAll(async () => {
     authRequests = [];
@@ -147,6 +148,7 @@ describe('API Gateway service proxy', () => {
     process.env.AUTH_SERVICE_URL = await listen(authServer);
     process.env.CATALOG_SERVICE_URL = await listen(catalogServer);
     process.env.CART_SERVICE_URL = await listen(cartServer);
+    process.env.ORDERS_SERVICE_URL = 'http://orders.internal.test';
 
     const moduleFixture = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleFixture.createNestApplication<NestExpressApplication>();
@@ -166,6 +168,8 @@ describe('API Gateway service proxy', () => {
     else process.env.CATALOG_SERVICE_URL = originalCatalogServiceUrl;
     if (originalCartServiceUrl === undefined) delete process.env.CART_SERVICE_URL;
     else process.env.CART_SERVICE_URL = originalCartServiceUrl;
+    if (originalOrdersServiceUrl === undefined) delete process.env.ORDERS_SERVICE_URL;
+    else process.env.ORDERS_SERVICE_URL = originalOrdersServiceUrl;
   });
 
   it('forwards Auth requests and preserves the inbound request ID', async () => {

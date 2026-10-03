@@ -40,6 +40,7 @@ export const gatewayEnvironmentSchema = baseEnvironmentSchema.extend({
   AUTH_SERVICE_URL: internalServiceOrigin,
   CATALOG_SERVICE_URL: internalServiceOrigin,
   CART_SERVICE_URL: internalServiceOrigin,
+  ORDERS_SERVICE_URL: internalServiceOrigin,
 });
 
 export const cartEnvironmentSchema = baseEnvironmentSchema.extend({
@@ -49,7 +50,24 @@ export const cartEnvironmentSchema = baseEnvironmentSchema.extend({
   CATALOG_INTERNAL_TOKEN: z.string().min(32),
 });
 
+export const ordersEnvironmentSchema = baseEnvironmentSchema.extend({
+  DATABASE_URL: z.string().url(),
+  CART_SERVICE_URL: internalServiceOrigin,
+  CATALOG_SERVICE_URL: internalServiceOrigin,
+  JWT_ACCESS_SECRET: z.string().min(32),
+  CART_INTERNAL_SERVICE_TOKEN: z.string().min(32),
+  CATALOG_INTERNAL_TOKEN: z.string().min(32),
+}).refine(
+  (environment) => new Set([
+    environment.JWT_ACCESS_SECRET,
+    environment.CART_INTERNAL_SERVICE_TOKEN,
+    environment.CATALOG_INTERNAL_TOKEN,
+  ]).size === 3,
+  'Orders service secrets must be distinct',
+);
+
 export type GatewayEnvironment = z.infer<typeof gatewayEnvironmentSchema>;
+export type OrdersEnvironment = z.infer<typeof ordersEnvironmentSchema>;
 
 export const parseBaseEnvironment = (environment: NodeJS.ProcessEnv) =>
   baseEnvironmentSchema.parse(environment);
@@ -61,3 +79,5 @@ export const parseGatewayEnvironment = (environment: NodeJS.ProcessEnv): Gateway
   gatewayEnvironmentSchema.parse(environment);
 export const parseCartEnvironment = (environment: NodeJS.ProcessEnv) =>
   cartEnvironmentSchema.parse(environment);
+export const parseOrdersEnvironment = (environment: NodeJS.ProcessEnv): OrdersEnvironment =>
+  ordersEnvironmentSchema.parse(environment);

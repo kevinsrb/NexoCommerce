@@ -10,11 +10,13 @@ describe('API gateway HTTP boundary', () => {
   const originalAuthServiceUrl = process.env.AUTH_SERVICE_URL;
   const originalCatalogServiceUrl = process.env.CATALOG_SERVICE_URL;
   const originalCartServiceUrl = process.env.CART_SERVICE_URL;
+  const originalOrdersServiceUrl = process.env.ORDERS_SERVICE_URL;
 
   beforeAll(async () => {
     process.env.AUTH_SERVICE_URL = 'http://auth.internal.test';
     process.env.CATALOG_SERVICE_URL = 'http://catalog.internal.test';
     process.env.CART_SERVICE_URL = 'http://cart.internal.test';
+    process.env.ORDERS_SERVICE_URL = 'http://orders.internal.test';
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -33,6 +35,8 @@ describe('API gateway HTTP boundary', () => {
     else process.env.CATALOG_SERVICE_URL = originalCatalogServiceUrl;
     if (originalCartServiceUrl === undefined) delete process.env.CART_SERVICE_URL;
     else process.env.CART_SERVICE_URL = originalCartServiceUrl;
+    if (originalOrdersServiceUrl === undefined) delete process.env.ORDERS_SERVICE_URL;
+    else process.env.ORDERS_SERVICE_URL = originalOrdersServiceUrl;
   });
 
   it('returns the gateway health response with a request ID', async () => {

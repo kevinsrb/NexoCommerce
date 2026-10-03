@@ -14,7 +14,9 @@
     "auth:prisma:generate": "pnpm --filter @nexo/auth-service prisma:generate",
     "auth:prisma:migrate": "pnpm --filter @nexo/auth-service prisma:migrate",
     "catalog:prisma:generate": "pnpm --filter @nexo/catalog-service prisma:generate",
-    "catalog:prisma:migrate": "pnpm --filter @nexo/catalog-service prisma:migrate"
+    "catalog:prisma:migrate": "pnpm --filter @nexo/catalog-service prisma:migrate",
+    "orders:prisma:generate": "pnpm --filter @nexo/orders-service prisma:generate",
+    "orders:prisma:migrate": "pnpm --filter @nexo/orders-service prisma:migrate"
   },
   "devDependencies": {
     "@types/jest": "29.5.14",

@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CheckoutAttemptState {
+  CLAIMED
+  CART_CLAIMED
+  PREPARED
+  RESERVATION_PENDING
+  ORDER_RECORDING
+  RESERVATION_BOUND
+  ORDER_PENDING
+  COMPLETE
+  FAILED
+}
+
+enum OrderRecordState {
+  RECORDING
+  PENDING
+  EXPIRED
+  CANCELLED
+}
+
+model CheckoutAttempt {
+  id             String               @id @default(uuid()) @db.Uuid
+  principalId    String               @map("principal_id")
+  idempotencyKey String               @map("idempotency_key")
+  requestHash    String               @map("request_hash")
+  cartVersion    BigInt?              @map("cart_version")
+  cartClaimRef   String?              @map("cart_claim_ref")
+  preparedLines  Json?                @map("prepared_lines")
+  state          CheckoutAttemptState @default(CLAIMED)
+  sagaVersion    Int                  @default(0) @map("saga_version")
+  reservationRef String?              @map("reservation_ref")
+  failureCode    String?              @map("failure_code")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+  order          Order?
+
+  @@unique([principalId, idempotencyKey])
+  @@map("checkout_attempts")
+}
+
+model Order {
+  id                         String           @id @default(uuid()) @db.Uuid
+  checkoutAttemptId          String           @unique @map("checkout_attempt_id") @db.Uuid
+  principalId                String           @map("principal_id")
+  cartVersion                BigInt           @map("cart_version")
+  state                      OrderRecordState @default(RECORDING)
+  currency                   String           @db.VarChar(3)
+  totalDecimal               Decimal          @map("total_decimal") @db.Decimal(38, 18)
+  expiresAt                  DateTime         @map("expires_at")
+  catalogPublicationRevision BigInt?          @map("catalog_publication_revision")
+  publishedAt                DateTime?        @map("published_at")
+  createdAt                  DateTime         @default(now()) @map("created_at")
+  updatedAt                  DateTime         @updatedAt @map("updated_at")
+  version                    Int              @default(0)
+  checkoutAttempt            CheckoutAttempt  @relation(fields: [checkoutAttemptId], references: [id], onDelete: Restrict)
+  lines                      OrderLine[]
+
+  @@unique([principalId, cartVersion])
+  @@map("orders")
+}
+
+model OrderLine {
+  id               String  @id @default(uuid()) @db.Uuid
+  orderId          String  @map("order_id") @db.Uuid
+  variantId        String  @map("variant_id") @db.Uuid
+  quantity         Int
+  unitPriceDecimal Decimal @map("unit_price_decimal") @db.Decimal(38, 18)
+  lineTotalDecimal Decimal @map("line_total_decimal") @db.Decimal(38, 18)
+  currency         String  @db.VarChar(3)
+  variantSnapshot  Json    @map("variant_snapshot")
+  order            Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@map("order_lines")
+}
+
+model Outbox {
+  id          String    @id @default(uuid()) @db.Uuid
+  eventType   String    @map("event_type")
+  aggregateId String    @map("aggregate_id")
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at")
+  availableAt DateTime  @default(now()) @map("available_at")
+  attempts    Int       @default(0)
+  completedAt DateTime? @map("completed_at")
+
+  @@index([completedAt, availableAt])
+  @@map("outbox")
+}
