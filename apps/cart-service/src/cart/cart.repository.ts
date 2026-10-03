@@ -65,6 +65,10 @@ local function result(status, value)
   return cjson.encode({status=status, version=version, cart=value or cjson.null})
 end
 if operation == 'read' then return result('ok', cart) end
+if operation == 'read_mutable' then
+  if claim and claim.status == 'active' then return result('claimed', cart) end
+  return result('ok', cart)
+end
 
 if operation == 'claim' then
   local attempt, expected = ARGV[2], tonumber(ARGV[3])
@@ -212,6 +216,15 @@ export class CartRepository implements OnApplicationBootstrap, OnApplicationShut
 
   async getCart(principalId: string): Promise<PersistedCart | null> {
     return (await this.execute(principalId, ['read'])).cart ?? null;
+  }
+
+  async getMutableCart(principalId: string): Promise<PersistedCart | null> {
+    const result = await this.execute(principalId, ['read_mutable']);
+    if (result.status === 'claimed') {
+      throw new CartDomainException('CART_CHECKOUT_IN_PROGRESS', 'Cart checkout in progress', 409);
+    }
+    if (result.status !== 'ok') throw new CartStorageUnavailableException();
+    return result.cart ?? null;
   }
 
   async readCheckoutSnapshot(principalId: string): Promise<CartCheckoutSnapshot> {

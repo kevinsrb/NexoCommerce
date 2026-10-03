@@ -396,6 +396,52 @@ describe('Authenticated Cart HTTP integration', () => {
       .toBe('CART_CHECKOUT_IN_PROGRESS');
   });
 
+  it.each([
+    ['add with unavailable Catalog', 'status', 'add'],
+    ['add with absent Catalog variant', 'missing', 'add'],
+    ['update with missing cart item', 'ok', 'missing-update'],
+    ['update with insufficient stock', 'stock', 'update'],
+  ] as const)('prioritizes an active claim over %s prevalidation', async (_name, mode, operation) => {
+    const http = request(h.app.getHttpServer());
+    await http.post('/cart/items').set('Authorization', `Bearer ${h.token()}`)
+      .send({ variantId, quantity: 1 }).expect(201);
+    await http.post('/internal/v1/cart/checkout-claims')
+      .set('x-internal-service-token', h.cartInternalToken).set('x-request-id', requestId)
+      .send({ principalId: userId, attemptId: '550e8400-e29b-41d4-a716-446655440010', expectedVersion: 1 })
+      .expect(200);
+    if (mode === 'status') h.mode = 'status';
+    if (mode === 'missing') h.variants = [];
+    if (mode === 'stock') h.variants[0].stock = 0;
+    const response = operation === 'missing-update'
+      ? await http.patch('/cart/items/550e8400-e29b-41d4-a716-446655440003')
+        .set('Authorization', `Bearer ${h.token()}`).send({ quantity: 1 }).expect(409)
+      : operation === 'update'
+        ? await http.patch(`/cart/items/${variantId}`)
+          .set('Authorization', `Bearer ${h.token()}`).send({ quantity: 2 }).expect(409)
+        : await http.post('/cart/items').set('Authorization', `Bearer ${h.token()}`)
+          .send({ variantId, quantity: 1 }).expect(409);
+    expect(response.body.code).toBe('CART_CHECKOUT_IN_PROGRESS');
+  });
+
+  it('prioritizes a claim over the 100-line add limit', async () => {
+    const http = request(h.app.getHttpServer());
+    const items = Array.from({ length: 100 }, (_, index) => ({
+      variantId: `550e8400-e29b-41d4-a716-${String(index).padStart(12, '0')}`,
+      quantity: 1,
+    }));
+    h.values.set(`cart:data:${userId}`, JSON.stringify({
+      currency: 'USD', items, updatedAt: '2026-10-02T12:34:56.000Z',
+    }));
+    h.values.set(`cart:version:${userId}`, '1');
+    await http.post('/internal/v1/cart/checkout-claims')
+      .set('x-internal-service-token', h.cartInternalToken).set('x-request-id', requestId)
+      .send({ principalId: userId, attemptId: '550e8400-e29b-41d4-a716-446655440010', expectedVersion: 1 })
+      .expect(200);
+    const response = await http.post('/cart/items').set('Authorization', `Bearer ${h.token()}`)
+      .send({ variantId: '550e8400-e29b-41d4-a716-446655440200', quantity: 1 }).expect(409);
+    expect(response.body.code).toBe('CART_CHECKOUT_IN_PROGRESS');
+  });
+
   it('fails closed if a live cart loses its persistent counter', async () => {
     const http = request(h.app.getHttpServer());
     await http.post('/cart/items').set('Authorization', `Bearer ${h.token()}`)

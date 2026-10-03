@@ -158,7 +158,7 @@ export class CartHarness {
           if (this.storageFailure) throw new Error('private redis failure');
           const [operation, variantId, quantityValue, currency, stockValue, ttlValue, updatedAt, validatedIdsValue] = options.arguments;
           const [key, versionKey, claimKey] = options.keys;
-          if (operation !== 'read') this.beforeMutation?.();
+          if (operation !== 'read' && operation !== 'read_mutable') this.beforeMutation?.();
           const current = this.values.get(key);
           let cart = current ? JSON.parse(current) as {
             currency: string;
@@ -194,6 +194,7 @@ export class CartHarness {
             this.afterMutation?.();
           };
           if (operation === 'read') return reply('ok');
+          if (operation === 'read_mutable') return reply(claim?.status === 'active' ? 'claimed' : 'ok');
           if (operation === 'claim') {
             const expected = Number(quantityValue);
             if (claim?.status === 'active') return reply(claim.attemptId === variantId && claim.version === expected ? 'ok' : 'claimed');
