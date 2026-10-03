@@ -17,6 +17,7 @@ export const missingId = '550e8400-e29b-41d4-a716-446655440003';
 export const requestId = '550e8400-e29b-41d4-a716-446655440004';
 const secret = 'access-secret-at-least-thirty-two-characters';
 const catalogInternalToken = 'catalog-internal-token-at-least-32-characters';
+const cartInternalToken = 'cart-internal-token-at-least-32-characters';
 export const emptyCart = { currency: null, items: [], total: '0.00', itemCount: 0 };
 
 export class CartHarness {
@@ -37,6 +38,7 @@ export class CartHarness {
   beforeMutation?: () => void;
   afterMutation?: () => void;
   variants: InternalCatalogVariant[] = [];
+  readonly cartInternalToken = cartInternalToken;
   reset(): void {
     this.values.clear();
     this.writes = [];
@@ -65,7 +67,7 @@ export class CartHarness {
     return new JwtService().sign(payload, { secret: signingSecret, expiresIn: '5m' });
   }
   stored(): unknown {
-    const value = this.values.get(`cart:${userId}`);
+    const value = this.values.get(`cart:data:${userId}`);
     return value ? JSON.parse(value) : null;
   }
   async start(): Promise<void> {
@@ -130,6 +132,7 @@ export class CartHarness {
           CATALOG_SERVICE_URL: `http://127.0.0.1:${(this.server.address() as AddressInfo).port}`,
           JWT_ACCESS_SECRET: secret,
           CATALOG_INTERNAL_TOKEN: catalogInternalToken,
+          CART_INTERNAL_SERVICE_TOKEN: cartInternalToken,
         }),
       )
       .overrideProvider(CART_REDIS_CLIENT)
@@ -153,63 +156,118 @@ export class CartHarness {
         },
         eval: async (_script: string, options: { keys: string[]; arguments: string[] }) => {
           if (this.storageFailure) throw new Error('private redis failure');
-          this.beforeMutation?.();
           const [operation, variantId, quantityValue, currency, stockValue, ttlValue, updatedAt, validatedIdsValue] = options.arguments;
-          const key = options.keys[0];
+          const [key, versionKey, claimKey] = options.keys;
+          if (operation !== 'read') this.beforeMutation?.();
           const current = this.values.get(key);
-          const cart = current ? JSON.parse(current) as {
+          let cart = current ? JSON.parse(current) as {
             currency: string;
             items: Array<{ variantId: string; quantity: number }>;
             updatedAt: string;
           } : null;
-          if (operation === 'clear') {
-            this.values.delete(key);
-            this.deletes.push(key);
-            return 1;
+          const claimValue = this.values.get(claimKey);
+          const claim = claimValue ? JSON.parse(claimValue) as {
+            attemptId: string; version: number; status: string; terminalVersion?: number;
+            terminalCart?: typeof cart;
+            history?: Record<string, { status: string; version: number; cart: typeof cart }>;
+          } : null;
+          let version = this.values.get(versionKey);
+          if (version === undefined) {
+            if (cart || claim) return JSON.stringify({ status: 'integrity' });
+            version = '0';
+            this.values.set(versionKey, version);
           }
-          if (operation === 'remove') {
-            if (!cart) return 0;
-            const items = cart.items.filter((item) => item.variantId !== variantId);
-            if (items.length === cart.items.length) return 0;
-            if (!items.length) {
+          if (claim?.status === 'active' && !cart) return JSON.stringify({ status: 'integrity' });
+          const reply = (status: string) => JSON.stringify({ status, version: Number(version), cart });
+          const advance = () => { version = String(Number(version) + 1); this.values.set(versionKey, version); };
+          const write = (next: typeof cart, ttl: number) => {
+            if (next) {
+              const value = JSON.stringify(next);
+              this.values.set(key, value);
+              this.writes.push({ key, value, ttl });
+            } else {
               this.values.delete(key);
               this.deletes.push(key);
-              return 1;
+            }
+            cart = next;
+            advance();
+            this.afterMutation?.();
+          };
+          if (operation === 'read') return reply('ok');
+          if (operation === 'claim') {
+            const expected = Number(quantityValue);
+            if (claim?.status === 'active') return reply(claim.attemptId === variantId && claim.version === expected ? 'ok' : 'claimed');
+            if (expected !== Number(version) || claim?.history?.[`${variantId}:${quantityValue}`]) return reply('version_changed');
+            if (!cart?.items.length) return reply('not_found');
+            this.values.set(claimKey, JSON.stringify({
+              attemptId: variantId, version: expected, status: 'active', history: claim?.history ?? {},
+            }));
+            return reply('ok');
+          }
+          if (operation === 'complete' || operation === 'release') {
+            const expected = Number(quantityValue);
+            const terminal = claim?.history?.[`${variantId}:${quantityValue}`];
+            if (terminal) return terminal.status === `${operation}d`
+              ? JSON.stringify({ status: 'ok', version: terminal.version, cart: terminal.cart })
+              : reply('version_changed');
+            if (!claim || claim.attemptId !== variantId || claim.version !== expected) return reply('version_changed');
+            if (claim.status === `${operation}d`) return JSON.stringify({
+              status: 'ok', version: claim.terminalVersion, cart: claim.terminalCart ?? null,
+            });
+            if (claim.status !== 'active' || expected !== Number(version) || !cart) return reply('version_changed');
+            if (operation === 'complete') write(null, Number(ttlValue));
+            this.values.set(claimKey, JSON.stringify({
+              ...claim, status: `${operation}d`, terminalVersion: Number(version), terminalCart: cart,
+              history: { ...claim.history, [`${variantId}:${quantityValue}`]: {
+                status: `${operation}d`, version: Number(version), cart,
+              } },
+            }));
+            return reply('ok');
+          }
+          if (claim?.status === 'active') return reply('claimed');
+          if (operation === 'clear') {
+            if (!cart) return reply('unchanged');
+            write(null, 0);
+            return reply('ok');
+          }
+          if (operation === 'remove') {
+            if (!cart) return reply('unchanged');
+            const items = cart.items.filter((item) => item.variantId !== variantId);
+            if (items.length === cart.items.length) return reply('unchanged');
+            if (!items.length) {
+              write(null, 0);
+              return reply('ok');
             }
             const next = { ...cart, items, updatedAt };
-            this.values.set(key, JSON.stringify(next));
-            this.writes.push({ key, value: JSON.stringify(next), ttl: Number(ttlValue) });
-            return 1;
+            write(next, Number(ttlValue));
+            return reply('ok');
           }
           const quantity = Number(quantityValue);
           const stock = Number(stockValue);
           if (!cart) {
-            if (operation !== 'add') return -4;
-          } else if (cart.currency !== currency) return -2;
+            if (operation !== 'add') return reply('item_not_found');
+          } else if (cart.currency !== currency) return reply('currency_mismatch');
           const next = cart ?? { currency, items: [], updatedAt };
           const validatedIds = JSON.parse(validatedIdsValue) as string[];
-          if (next.items.some((item) => !validatedIds.includes(item.variantId))) return -6;
+          if (next.items.some((item) => !validatedIds.includes(item.variantId))) return reply('concurrent_modification');
           const existing = next.items.find((item) => item.variantId === variantId);
-          if (operation === 'update' && !existing) return -4;
+          if (operation === 'update' && !existing) return reply('item_not_found');
           if (operation === 'add') {
             if (existing) {
-              if (existing.quantity + quantity > stock) return -3;
+              if (existing.quantity + quantity > stock) return reply('stock');
               existing.quantity += quantity;
             } else {
-              if (next.items.length >= 100) return -5;
-              if (quantity > stock) return -3;
+              if (next.items.length >= 100) return reply('too_many');
+              if (quantity > stock) return reply('stock');
               next.items.push({ variantId, quantity });
             }
           } else {
-            if (quantity > stock) return -3;
+            if (quantity > stock) return reply('stock');
             existing!.quantity = quantity;
           }
           next.updatedAt = updatedAt;
-          const value = JSON.stringify(next);
-          this.values.set(key, value);
-          this.writes.push({ key, value, ttl: Number(ttlValue) });
-          this.afterMutation?.();
-          return value;
+          write(next, Number(ttlValue));
+          return reply('ok');
         },
       })
       .compile();

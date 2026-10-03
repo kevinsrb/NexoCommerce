@@ -48,7 +48,15 @@ export const cartEnvironmentSchema = baseEnvironmentSchema.extend({
   CATALOG_SERVICE_URL: internalServiceOrigin,
   JWT_ACCESS_SECRET: z.string().min(32),
   CATALOG_INTERNAL_TOKEN: z.string().min(32),
-});
+  CART_INTERNAL_SERVICE_TOKEN: z.string().min(32),
+}).refine(
+  (environment) => new Set([
+    environment.JWT_ACCESS_SECRET,
+    environment.CATALOG_INTERNAL_TOKEN,
+    environment.CART_INTERNAL_SERVICE_TOKEN,
+  ]).size === 3,
+  'Cart service secrets must be distinct',
+);
 
 export const ordersEnvironmentSchema = baseEnvironmentSchema.extend({
   DATABASE_URL: z.string().url(),

@@ -6,6 +6,7 @@ describe('Cart environment', () => {
     CATALOG_SERVICE_URL: 'http://localhost:3002',
     JWT_ACCESS_SECRET: 'a'.repeat(32),
     CATALOG_INTERNAL_TOKEN: 'b'.repeat(32),
+    CART_INTERNAL_SERVICE_TOKEN: 'c'.repeat(32),
   };
 
   it.each([
@@ -20,6 +21,8 @@ describe('Cart environment', () => {
     { ...valid, CATALOG_SERVICE_URL: 'https://catalog.internal.test#fragment' },
     { ...valid, JWT_ACCESS_SECRET: 'short' },
     { ...valid, CATALOG_INTERNAL_TOKEN: valid.JWT_ACCESS_SECRET },
+    { ...valid, CART_INTERNAL_SERVICE_TOKEN: valid.JWT_ACCESS_SECRET },
+    { ...valid, CART_INTERNAL_SERVICE_TOKEN: valid.CATALOG_INTERNAL_TOKEN },
     { ...valid, PORT: '0' },
     { ...valid, PORT: '65536' },
     { ...valid, PORT: 'abc' },

@@ -53,6 +53,18 @@ class HttpExceptionFilter implements ExceptionFilter {
         'Cart storage unavailable',
       );
     }
+    if (request.path.startsWith('/internal/v1/cart/')) {
+      response.status(statusCode).json({
+        code: error instanceof CartStorageUnavailableException ? 'DEPENDENCY_UNAVAILABLE'
+          : error instanceof CartDomainException ? error.code
+            : statusCode === 400 ? 'INVALID_REQUEST'
+              : statusCode === 401 ? 'UNAUTHENTICATED'
+                : body.code,
+        message: body.message,
+        request_id: body.requestId,
+      });
+      return;
+    }
     response.status(statusCode).json(body);
   }
 }

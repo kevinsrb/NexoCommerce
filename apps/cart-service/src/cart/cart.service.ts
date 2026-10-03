@@ -62,15 +62,32 @@ export class CartService {
 
   async removeItem(userId: string, variantId: string): Promise<void> {
     variantId = variantId.toLowerCase();
-    await this.repository.mutateCart(userId, {
+    const result = await this.repository.mutateCart(userId, {
       operation: 'remove',
       variantId,
       updatedAt: new Date().toISOString(),
     });
+    if (result === -7) this.checkoutInProgress();
   }
 
   async clearCart(userId: string): Promise<void> {
-    await this.repository.mutateCart(userId, { operation: 'clear' });
+    const result = await this.repository.mutateCart(userId, { operation: 'clear' });
+    if (result === -7) this.checkoutInProgress();
+  }
+
+  readCheckout(principalId: string) { return this.repository.readCheckoutSnapshot(principalId); }
+  claimCheckout(principalId: string, attemptId: string, version: number) {
+    return this.repository.claimCheckout(principalId, attemptId, version);
+  }
+  completeCheckout(principalId: string, attemptId: string, version: number) {
+    return this.repository.completeCheckout(principalId, attemptId, version);
+  }
+  releaseCheckout(principalId: string, attemptId: string, version: number) {
+    return this.repository.releaseCheckout(principalId, attemptId, version);
+  }
+
+  private checkoutInProgress(): never {
+    throw new CartDomainException('CART_CHECKOUT_IN_PROGRESS', 'Cart checkout in progress', 409);
   }
 
   private async mutateValidated(
@@ -122,6 +139,7 @@ export class CartService {
       throw new BadRequestException('Cart supports at most 100 distinct variants');
     if (result === -6)
       throw new CartDomainException('CART_CONCURRENT_MODIFICATION', 'Cart changed; please retry', 409);
+    if (result === -7) this.checkoutInProgress();
     if (typeof result === 'number') throw new Error('Invalid cart mutation result');
     return this.response(result, variants);
   }

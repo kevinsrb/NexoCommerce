@@ -18,17 +18,19 @@ describe('Cart domain through real service, repository and HTTP', () => {
 
   it('returns an empty cart without creating state or calling Catalog', async () => {
     expect((await get().expect(200)).body).toEqual(emptyCart);
-    expect(h.values.size).toBe(0);
+    expect(h.values.get(`cart:version:${userId}`)).toBe('0');
+    expect(h.values.has(`cart:data:${userId}`)).toBe(false);
     expect(h.calls).toEqual([]);
   });
 
   it.each(['add', 'update'])('returns the confirmed %s without another Catalog request after committing', async (operation) => {
-    h.values.set(`cart:${userId}`, JSON.stringify({
+    h.values.set(`cart:version:${userId}`, '1');
+    h.values.set(`cart:data:${userId}`, JSON.stringify({
       currency: 'USD', items: [{ variantId, quantity: 1 }, { variantId: otherId, quantity: 1 }],
       updatedAt: '2026-09-13T00:00:00.000Z',
     }));
     h.beforeMutation = () => {
-      h.values.set(`cart:${userId}`, JSON.stringify({
+      h.values.set(`cart:data:${userId}`, JSON.stringify({
         currency: 'USD', items: [{ variantId, quantity: 1 }, { variantId: otherId, quantity: 3 }],
         updatedAt: '2026-09-13T00:00:01.000Z',
       }));
@@ -54,13 +56,13 @@ describe('Cart domain through real service, repository and HTTP', () => {
       currency: 'USD', items: [{ variantId: otherId, quantity: 3 }],
       updatedAt: '2026-09-13T00:00:00.000Z',
     });
-    h.beforeMutation = () => { h.values.set(`cart:${userId}`, concurrent); };
+    h.beforeMutation = () => { h.values.set(`cart:data:${userId}`, concurrent); };
 
     const response = await add();
 
     expect(response.status).toBe(409);
     expect(response.body.code).toBe('CART_CONCURRENT_MODIFICATION');
-    expect(h.values.get(`cart:${userId}`)).toBe(concurrent);
+    expect(h.values.get(`cart:data:${userId}`)).toBe(concurrent);
     expect(h.calls.map((call) => call.ids)).toEqual([[variantId]]);
     expect(h.writes).toEqual([]);
   });
@@ -71,8 +73,9 @@ describe('Cart domain through real service, repository and HTTP', () => {
       ...fixture,
       id: `550e8400-e29b-41d4-a716-${String(index).padStart(12, '0')}`,
     }));
+    h.values.set(`cart:version:${userId}`, '1');
     h.values.set(
-      `cart:${userId}`,
+      `cart:data:${userId}`,
       JSON.stringify({
         currency: 'USD',
         items: h.variants.slice(0, 99).map((variant) => ({ variantId: variant.id, quantity: 1 })),
@@ -80,9 +83,9 @@ describe('Cart domain through real service, repository and HTTP', () => {
       }),
     );
     expect((await add(h.variants[99].id).expect(201)).body.itemCount).toBe(100);
-    const before = h.values.get(`cart:${userId}`);
+    const before = h.values.get(`cart:data:${userId}`);
     expect((await add(h.variants[100].id).expect(400)).body.code).toBe('BAD_REQUEST');
-    expect(h.values.get(`cart:${userId}`)).toBe(before);
+    expect(h.values.get(`cart:data:${userId}`)).toBe(before);
     expect(h.calls).toHaveLength(1);
     expect(h.writes).toHaveLength(1);
     expect((await add(h.variants[0].id).expect(201)).body.itemCount).toBe(101);
@@ -192,13 +195,13 @@ describe('Cart domain through real service, repository and HTTP', () => {
     'rejects $field with $code without changing persisted state',
     async ({ field, code, status }) => {
       await add().expect(201);
-      const before = h.values.get(`cart:${userId}`);
+      const before = h.values.get(`cart:data:${userId}`);
       if (field === 'missing') h.variants = [];
       else if (field === 'stock') h.variants[0].stock = 1;
       else if (field === 'productActive') h.variants[0].productActive = false;
       else h.variants[0].variantActive = false;
       expect((await add().expect(status)).body.code).toBe(code);
-      expect(h.values.get(`cart:${userId}`)).toBe(before);
+      expect(h.values.get(`cart:data:${userId}`)).toBe(before);
       expect(h.writes).toHaveLength(1);
     },
   );
@@ -215,9 +218,9 @@ describe('Cart domain through real service, repository and HTTP', () => {
   it('rejects a different currency addition and preserves all existing state', async () => {
     await add().expect(201);
     h.variants[1].currency = 'COP';
-    const before = h.values.get(`cart:${userId}`);
+    const before = h.values.get(`cart:data:${userId}`);
     expect((await add(otherId).expect(409)).body.code).toBe('CART_CURRENCY_MISMATCH');
-    expect(h.values.get(`cart:${userId}`)).toBe(before);
+    expect(h.values.get(`cart:data:${userId}`)).toBe(before);
     expect(h.writes).toHaveLength(1);
   });
 
@@ -288,10 +291,10 @@ describe('Cart domain through real service, repository and HTTP', () => {
 
   it('removes and clears idempotently without Catalog, deletes currency, and never renews unchanged TTL', async () => {
     await add().expect(201);
-    const before = h.values.get(`cart:${userId}`);
+    const before = h.values.get(`cart:data:${userId}`);
     h.mode = 'status';
     await remove(missingId).expect(204);
-    expect(h.values.get(`cart:${userId}`)).toBe(before);
+    expect(h.values.get(`cart:data:${userId}`)).toBe(before);
     expect(h.writes).toHaveLength(1);
     await clear().expect(204);
     await clear().expect(204);

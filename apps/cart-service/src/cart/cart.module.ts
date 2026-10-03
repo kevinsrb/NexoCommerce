@@ -5,6 +5,8 @@ import { AuthModule } from '../auth/auth.module';
 import { CatalogClient } from '../catalog/catalog.client';
 import { CartController } from './cart.controller';
 import { CartService } from './cart.service';
+import { InternalCartController } from './internal-cart.controller';
+import { InternalCartServiceGuard } from '../common/internal-cart-service.guard';
 import { CART_ENVIRONMENT, type CartEnvironment } from '../common/environment';
 import { CartRepository, type CartRedisClient } from './cart.repository';
 
@@ -19,8 +21,9 @@ export const createCartRedisClient = (url: string): CartRedisClient => {
 
 @Module({
   imports: [AuthModule],
-  controllers: [CartController],
+  controllers: [CartController, InternalCartController],
   providers: [
+    InternalCartServiceGuard,
     CatalogClient,
     CartService,
     {
