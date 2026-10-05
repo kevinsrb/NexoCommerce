@@ -10,9 +10,10 @@ export const parseEnvironment = (input: NodeJS.ProcessEnv) => {
   }
   if (
     environment.CATALOG_ADMIN_SECRET === environment.JWT_ACCESS_SECRET ||
-    environment.CATALOG_ADMIN_SECRET === environment.CATALOG_INTERNAL_TOKEN
+    environment.CATALOG_ADMIN_SECRET === environment.CATALOG_INTERNAL_TOKEN ||
+    environment.CATALOG_INTERNAL_TOKEN === environment.JWT_ACCESS_SECRET
   ) {
-    throw new Error('Catalog admin proof secret must differ from service secrets');
+    throw new Error('Catalog service secrets must be distinct');
   }
   return environment;
 };

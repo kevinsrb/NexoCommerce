@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { type InternalCatalogVariant } from '@nexo/contracts';
 import { Prisma, type Category } from '../../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CatalogDomainException } from '../common/catalog-domain.exception';
 import {
   CreateCategoryDto,
   CreateProductDto,
@@ -43,18 +44,22 @@ const presentProduct = (product: ProductWithRelations) => ({
     name: variant.name,
     price: variant.price.toFixed(2),
     currency: variant.currency,
-    stock: variant.stock,
+    stock: variant.onHand - variant.reserved,
+    available: variant.onHand - variant.reserved,
     active: variant.active,
   })),
 });
-const presentInternalVariant = (variant: InternalVariantWithProduct): InternalCatalogVariant => ({
+const presentInternalVariant = (
+  variant: InternalVariantWithProduct,
+): InternalCatalogVariant & { available: number } => ({
   id: variant.id,
   productId: variant.productId,
   productName: variant.product.name,
   variantName: variant.name,
   price: variant.price.toFixed(2),
   currency: variant.currency,
-  stock: variant.stock,
+  stock: variant.onHand - variant.reserved,
+  available: variant.onHand - variant.reserved,
   productActive: variant.product.active,
   variantActive: variant.active,
 });
@@ -65,7 +70,7 @@ const variantData = (
   name: variant.name,
   price: new Prisma.Decimal(variant.price),
   currency: variant.currency,
-  stock: variant.stock,
+  onHand: variant.stock,
   active: variant.active,
 });
 
@@ -90,19 +95,75 @@ export class CatalogService {
     if (Object.values(dto).every((value) => value === undefined))
       throw new BadRequestException('At least one product field is required');
     const { categoryId, variants, ...fields } = dto;
-    const product = await this.prisma.product.update({
-      where: { id },
-      data: {
-        ...fields,
-        ...(categoryId === undefined ? {} : { category: { connect: { id: categoryId } } }),
-        // Nested writes are transactional: a failed replacement keeps the old variants.
-        ...(variants === undefined
-          ? {}
-          : { variants: { deleteMany: {}, create: variants.map(variantData) } }),
-      },
-      include,
+    const product = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Product" WHERE id = ${id}::uuid FOR UPDATE`;
+      if (variants !== undefined) await this.protectVariants(tx, id);
+      return tx.product.update({
+        where: { id },
+        data: {
+          ...fields,
+          ...(categoryId === undefined ? {} : { category: { connect: { id: categoryId } } }),
+          // Nested writes are transactional: a failed replacement keeps the old variants.
+          ...(variants === undefined
+            ? {}
+            : { variants: { deleteMany: {}, create: variants.map(variantData) } }),
+        },
+        include,
+      });
     });
     return presentProduct(product);
+  }
+
+  private async protectVariants(tx: Prisma.TransactionClient, productId: string) {
+    const rows = await tx.$queryRaw<Array<{ id: string; reserved: number }>>`
+      SELECT id, reserved FROM "ProductVariant" WHERE "productId" = ${productId}::uuid ORDER BY id FOR UPDATE`;
+    if (rows.some((row) => row.reserved > 0))
+      throw new CatalogDomainException(
+        'INVENTORY_RESERVED',
+        'Variants have nonterminal reservations',
+        409,
+      );
+  }
+
+  async deleteProduct(id: string) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Product" WHERE id = ${id}::uuid FOR UPDATE`;
+      await this.protectVariants(tx, id);
+      await tx.product.delete({ where: { id } });
+      return { id };
+    });
+  }
+
+  async adjustStock(id: string, onHand: number) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "ProductVariant" WHERE id = ${id}::uuid FOR UPDATE`;
+      const variant = await tx.productVariant.findUnique({ where: { id } });
+      if (!variant) throw new NotFoundException('Variant not found');
+      if (onHand < variant.reserved)
+        throw new CatalogDomainException(
+          'INVENTORY_RESERVED',
+          'Stock cannot be lower than reserved quantity',
+          409,
+          { available: variant.onHand - variant.reserved, reserved: variant.reserved },
+        );
+      await tx.productVariant.update({ where: { id }, data: { onHand } });
+      return { variantId: id, available: onHand - variant.reserved, reserved: variant.reserved };
+    });
+  }
+
+  async getInternalVariant(id: string) {
+    const variant = await this.prisma.productVariant.findUnique({
+      where: { id },
+      include: internalVariantInclude,
+    });
+    if (!variant) throw new CatalogDomainException('VARIANT_NOT_FOUND', 'Variant not found', 404);
+    return {
+      variantId: variant.id,
+      sellable: variant.active && variant.product.active,
+      available: variant.onHand - variant.reserved,
+      price_decimal: variant.price.toFixed(2),
+      currency: variant.currency,
+    };
   }
 
   async getProduct(slug: string) {

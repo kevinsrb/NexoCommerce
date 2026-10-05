@@ -39,11 +39,61 @@ model ProductVariant {
   name      String
   price     Decimal  @db.Decimal(18, 2)
   currency  String   @db.VarChar(3)
-  stock     Int      @default(0)
+  onHand    Int      @default(0)
+  reserved  Int      @default(0)
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId])
+}
+
+enum ReservationState {
+  ACTIVE
+  PUBLISHED
+  RELEASED
+  EXPIRED
+}
+
+model StockReservation {
+  id                  String            @id @default(uuid()) @db.Uuid
+  attemptId           String            @unique @db.Uuid
+  requestHash         String
+  state               ReservationState  @default(ACTIVE)
+  reservedAt          DateTime          @db.Timestamptz(3)
+  expiresAt           DateTime          @db.Timestamptz(3)
+  boundOrderId        String?           @unique @db.Uuid
+  publicationRevision Int?
+  publishedAt         DateTime?         @db.Timestamptz(3)
+  revision            Int               @default(0)
+  createdAt           DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime          @updatedAt @db.Timestamptz(3)
+  lines               ReservationLine[]
+  expiryEvent         ReservationExpiryEvent?
+
+  @@index([state, expiresAt])
+}
+
+model ReservationLine {
+  reservationId String           @db.Uuid
+  // Immutable snapshot ID: terminal reservations survive administrative replacement.
+  variantId     String           @db.Uuid
+  quantity      Int
+  unitPrice     Decimal          @db.Decimal(18, 2)
+  currency      String           @db.VarChar(3)
+  reservation   StockReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+
+  @@id([reservationId, variantId])
+  @@index([variantId])
+}
+
+model ReservationExpiryEvent {
+  id                  String           @id @default(uuid()) @db.Uuid
+  reservationId       String           @unique @db.Uuid
+  attemptId           String           @db.Uuid
+  boundOrderId        String?          @db.Uuid
+  publicationRevision Int?
+  occurredAt          DateTime         @db.Timestamptz(3)
+  reservation         StockReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict)
 }

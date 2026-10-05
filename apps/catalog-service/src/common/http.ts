@@ -12,6 +12,7 @@ import { createLogger, withRequestContext } from '@nexo/logger';
 import { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { Prisma } from '../../generated/client';
+import { CatalogDomainException } from './catalog-domain.exception';
 
 const logger = createLogger('catalog-service');
 type ContextRequest = Request & { requestId?: string };
@@ -64,6 +65,15 @@ class HttpExceptionFilter implements ExceptionFilter {
                 : 'Request failed',
       requestId: request.requestId ?? 'unknown',
     };
+    if (request.path.startsWith('/internal/v1/') || error instanceof CatalogDomainException) {
+      response.status(statusCode).json({
+        code: error instanceof CatalogDomainException ? error.code
+          : ({ 400: 'INVALID_REQUEST', 401: 'UNAUTHENTICATED' } as Record<number, string>)[statusCode] ?? body.code,
+        message: body.message, request_id: body.requestId,
+        ...(error instanceof CatalogDomainException && error.details ? { details: error.details } : {}),
+      });
+      return;
+    }
     response.status(statusCode).json(body);
   }
 }

@@ -66,6 +66,8 @@ const row = {
       productId,
       ...input.variants[0],
       price: new Prisma.Decimal('1234567890123456.78'),
+      onHand: 12,
+      reserved: 4,
       active: true,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -87,7 +89,8 @@ const publicProduct = {
       name: '250 grams',
       price: '1234567890123456.78',
       currency: 'COP',
-      stock: 12,
+      stock: 8,
+      available: 8,
       active: true,
     },
   ],
@@ -99,7 +102,8 @@ const internalVariants = [
     name: '250 grams',
     price: new Prisma.Decimal('1234567890123456.78'),
     currency: 'COP',
-    stock: 12,
+    onHand: 12,
+    reserved: 4,
     active: true,
     product: { id: productId, name: 'Roasted coffee', active: true },
   },
@@ -109,7 +113,8 @@ const internalVariants = [
     name: 'Inactive product variant',
     price: new Prisma.Decimal('9.50'),
     currency: 'COP',
-    stock: 3,
+    onHand: 3,
+    reserved: 1,
     active: true,
     product: {
       id: '550e8400-e29b-41d4-a716-446655440006',
@@ -123,7 +128,8 @@ const internalVariants = [
     name: 'Inactive variant',
     price: new Prisma.Decimal('11.00'),
     currency: 'COP',
-    stock: 0,
+    onHand: 0,
+    reserved: 0,
     active: false,
     product: { id: productId, name: 'Roasted coffee', active: true },
   },
@@ -132,6 +138,8 @@ const internalVariants = [
 describe('Catalog HTTP through the real service, only Prisma mocked', () => {
   let app: NestExpressApplication;
   const prisma = {
+    $transaction: jest.fn(),
+    $queryRaw: jest.fn(),
     product: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
     productVariant: { findMany: jest.fn() },
     category: { create: jest.fn(), findMany: jest.fn() },
@@ -161,6 +169,8 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
   });
   beforeEach(() => {
     jest.resetAllMocks();
+    prisma.$transaction.mockImplementation((work) => work(prisma));
+    prisma.$queryRaw.mockResolvedValue([]);
   });
 
   it.each([
@@ -171,6 +181,19 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     if (authorization) requestBuilder.set('Authorization', `Bearer ${authorization}`);
     await requestBuilder.expect(status);
     expect(prisma.product.create).not.toHaveBeenCalled();
+  });
+
+  it('requires the service token on every v1 reservation and variant route', async () => {
+    for (const call of [
+      () => request(app.getHttpServer()).post('/internal/v1/reservations').send({}),
+      () => request(app.getHttpServer()).post(`/internal/v1/reservations/by-attempt/${productId}/publish-order`).send({}),
+      () => request(app.getHttpServer()).get(`/internal/v1/reservations/by-attempt/${productId}`),
+      () => request(app.getHttpServer()).delete(`/internal/v1/reservations/by-attempt/${productId}`),
+      () => request(app.getHttpServer()).get(`/internal/v1/variants/${variantId}`),
+    ]) {
+      const response = await call().expect(401);
+      expect(response.body).toMatchObject({ code: 'UNAUTHENTICATED', request_id: response.headers['x-request-id'] });
+    }
   });
 
   it('allows an ADMIN access token to administer Catalog', async () => {
@@ -306,7 +329,8 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
         variantName: '250 grams',
         price: '1234567890123456.78',
         currency: 'COP',
-        stock: 12,
+        stock: 8,
+        available: 8,
         productActive: true,
         variantActive: true,
       },
@@ -317,7 +341,8 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
         variantName: 'Inactive product variant',
         price: '9.50',
         currency: 'COP',
-        stock: 3,
+        stock: 2,
+        available: 2,
         productActive: false,
         variantActive: true,
       },
@@ -329,6 +354,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
         price: '11.00',
         currency: 'COP',
         stock: 0,
+        available: 0,
         productActive: true,
         variantActive: false,
       },

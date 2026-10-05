@@ -17,6 +17,13 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+export class AdjustStockDto {
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  onHand!: number;
+}
+
 export class CreateCategoryDto {
   @IsString()
   @Matches(/\S/)
