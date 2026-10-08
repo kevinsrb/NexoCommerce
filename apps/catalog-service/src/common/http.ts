@@ -17,6 +17,14 @@ import { CatalogDomainException } from './catalog-domain.exception';
 const logger = createLogger('catalog-service');
 type ContextRequest = Request & { requestId?: string };
 
+const unavailableDatabaseCodes = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2037']);
+const isDatabaseUnavailable = (error: unknown): boolean =>
+  (error instanceof Prisma.PrismaClientInitializationError &&
+    (unavailableDatabaseCodes.has(error.errorCode ?? '') ||
+      // Prisma omits errorCode for an unreachable host during a model query.
+      (!error.errorCode && error.message.includes("Can't reach database server at")))) ||
+  (error instanceof Prisma.PrismaClientKnownRequestError && unavailableDatabaseCodes.has(error.code));
+
 const isPayloadTooLargeError = (error: unknown): boolean => {
   if (!error || typeof error !== 'object') return false;
   const parserError = error as { status?: unknown; statusCode?: unknown; type?: unknown };
@@ -32,6 +40,14 @@ class HttpExceptionFilter implements ExceptionFilter {
     const context = host.switchToHttp();
     const request = context.getRequest<ContextRequest>();
     const response = context.getResponse<Response>();
+    if (request.path.startsWith('/internal/v1/') && isDatabaseUnavailable(error)) {
+      response.status(503).json({
+        code: 'DEPENDENCY_UNAVAILABLE',
+        message: 'Dependency unavailable',
+        request_id: request.requestId ?? 'unknown',
+      });
+      return;
+    }
     const databaseError =
       error instanceof Prisma.PrismaClientKnownRequestError
         ? { P2002: 409, P2003: 400, P2025: 404 }[error.code]

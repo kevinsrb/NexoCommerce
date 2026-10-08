@@ -141,7 +141,7 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
     $transaction: jest.fn(),
     $queryRaw: jest.fn(),
     product: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
-    productVariant: { findMany: jest.fn() },
+    productVariant: { findMany: jest.fn(), findUnique: jest.fn() },
     category: { create: jest.fn(), findMany: jest.fn() },
   };
 
@@ -504,6 +504,44 @@ describe('Catalog HTTP through the real service, only Prisma mocked', () => {
       .expect(400);
     expect(malformed.body.message).toBe('Bad request');
     expect(malformed.body.requestId).toBe(malformed.headers['x-request-id']);
+  });
+
+  it.each(['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2037'])(
+    'maps Prisma connectivity/timeout/capacity error %s consistently across v1 reads', async (code) => {
+      const error = new Prisma.PrismaClientKnownRequestError('private database connection detail', {
+        code, clientVersion: '6.19.0',
+      });
+      prisma.productVariant.findUnique.mockRejectedValue(error);
+      prisma.$transaction.mockRejectedValue(error);
+      for (const path of [`/internal/v1/variants/${variantId}`, `/internal/v1/reservations/by-attempt/${productId}`]) {
+        const response = await request(app.getHttpServer()).get(path)
+          .set('x-internal-service-token', internalToken).set('x-request-id', productId).expect(503);
+        expect(response.headers['x-request-id']).toBe(productId);
+        expect(response.body).toEqual({ code: 'DEPENDENCY_UNAVAILABLE', message: 'Dependency unavailable', request_id: productId });
+      }
+    },
+  );
+
+  it.each([
+    new Error('private unexpected failure'),
+    Object.assign(new Error('not a Prisma error'), { code: 'P1001' }),
+    new Prisma.PrismaClientKnownRequestError('private schema problem', { code: 'P2022', clientVersion: '6.19.0' }),
+    new Prisma.PrismaClientInitializationError('Authentication failed', '6.19.0', 'P1000'),
+    new Prisma.PrismaClientInitializationError('Invalid schema', '6.19.0', 'P1012'),
+    new Prisma.PrismaClientInitializationError('Unclassified initialization problem', '6.19.0'),
+  ])('keeps unexpected and nonavailability failures as sanitized v1 500s', async (error) => {
+    prisma.productVariant.findUnique.mockRejectedValue(error);
+    const response = await request(app.getHttpServer()).get(`/internal/v1/variants/${variantId}`)
+      .set('x-internal-service-token', internalToken).set('x-request-id', productId).expect(500);
+    expect(response.body).toEqual({ code: 'INTERNAL_SERVER_ERROR', message: 'Internal server error', request_id: productId });
+  });
+
+  it('preserves the legacy public error envelope for database outages', async () => {
+    prisma.product.findMany.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('private connection detail', {
+      code: 'P1001', clientVersion: '6.19.0',
+    }));
+    const response = await request(app.getHttpServer()).get('/products').set('x-request-id', productId).expect(500);
+    expect(response.body).toEqual({ statusCode: 500, code: 'INTERNAL_SERVER_ERROR', message: 'Internal server error', requestId: productId });
   });
 
   it('returns a safe 413 error for an oversized JSON request body', async () => {
