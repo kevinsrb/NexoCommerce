@@ -70,30 +70,30 @@ NexoCommerce/
 
 ## Local setup
 
-Install a current Node.js release with Corepack/pnpm available, Docker Desktop (or another Docker engine with Compose), and Git. From the repository root in PowerShell:
+Install a current Node.js release with Corepack/pnpm available, Docker Desktop (or another Docker engine with Compose), and Git. Open the repository root in PowerShell.
+
+For the normal day-to-day workflow, run one command:
 
 ```powershell
-pnpm install
-Copy-Item .env.example .env
-Copy-Item apps\api-gateway\.env.example apps\api-gateway\.env
-Copy-Item apps\auth-service\.env.example apps\auth-service\.env
-Copy-Item apps\catalog-service\.env.example apps\catalog-service\.env
-Copy-Item apps\cart-service\.env.example apps\cart-service\.env
-Copy-Item apps\orders-service\.env.example apps\orders-service\.env
-Copy-Item apps\web\.env.example apps\web\.env
-pnpm db:up
-pnpm auth:prisma:generate
-pnpm catalog:prisma:generate
-pnpm orders:prisma:generate
-pnpm auth:prisma:migrate
-pnpm catalog:prisma:migrate
-pnpm orders:prisma:migrate
-# Required once when upgrading a Phase 2 Redis dataset; stop Cart writes first.
-pnpm --filter @nexo/cart-service migrate:keys
-pnpm dev
+pnpm local:up
 ```
 
-`pnpm db:up` starts PostgreSQL and Redis using the root `.env`. On a new Compose volume, PostgreSQL's init script creates `auth_db`, `catalog_db`, and `order_db`; migrations then create the service-owned tables. Apply the Catalog and Orders migrations before enabling checkout. The Redis key migration is only for a non-empty Phase 2 dataset; it atomically moves each valid `cart:{principalId}` payload to the Phase 3 keys and seeds its persistent counter. Do not start the applications against an un-migrated database if you intend to use database-backed routes. `pnpm dev` starts the storefront on 3000, API gateway on 3003, Auth on 3001, Catalog on 3002, Cart on 3004, and Orders on 3005. The backend applications load their own app-local `.env` files; the web development server uses its default port 3000.
+It creates only missing `.env` files from their examples, installs dependencies only when `node_modules/.pnpm` is absent, checks local application ports, starts PostgreSQL and Redis through Docker Compose, waits for their health checks, confirms the Prisma migration status, then starts Web, Gateway, Auth, Catalog, Cart, and Orders through Turbo with hot reload. It never overwrites an existing `.env`, changes a port, or runs a migration automatically. Press `Ctrl+C` to stop every local application process; Docker infrastructure remains running until you run `pnpm local:down`.
+
+On a new clone or after pulling a new committed Prisma migration, prepare the databases explicitly once before `local:up`:
+
+```powershell
+pnpm local:prepare
+pnpm local:up
+```
+
+`local:prepare` starts healthy Docker infrastructure, generates the three Prisma clients, and uses `prisma migrate deploy` to apply only committed forward migrations. It does not reset or delete databases. The legacy Cart Redis migration is deliberately separate because it transforms existing Phase 2 data; stop Cart writes first, then run it only when upgrading such a dataset:
+
+```powershell
+pnpm --filter @nexo/cart-service migrate:keys
+```
+
+`pnpm local:infra` starts only PostgreSQL and Redis. If a configured application port is already occupied, `local:up` stops before launching applications. If a Compose port conflicts, Docker reports it; update the relevant values yourself in the root `.env` and the matching service `.env` (for example, set both `REDIS_PORT` and Cart `REDIS_URL` to `16379`). The scripts validate that local Redis/PostgreSQL URLs match the configured Compose ports rather than changing either file automatically.
 
 After startup, the local addresses are:
 
@@ -149,6 +149,12 @@ Run these root commands from the repository root:
 | Command | Meaning |
 | --- | --- |
 | `pnpm dev` | Run all workspace development scripts through Turbo: Web 3000, Gateway 3003, Auth 3001, Catalog 3002, Cart 3004, and Orders 3005 with copied app-local environment files. |
+| `pnpm local:up` | Daily full-stack entry point: create missing config, install only missing dependencies, start/health-check Compose infrastructure, confirm migration status, and run all apps with hot reload. It never deploys migrations. |
+| `pnpm local:prepare` | Explicit one-time/per-migration preparation: start infrastructure, generate Prisma clients, and deploy committed forward migrations without resetting data. |
+| `pnpm local:infra` | Create missing local configuration (and restore missing workspace dependencies if needed), then start only PostgreSQL and Redis through Compose. |
+| `pnpm local:down` | Stop and remove only this project's Compose containers; named volumes remain. |
+| `pnpm dev:web`, `pnpm dev:gateway`, `pnpm dev:auth`, `pnpm dev:catalog`, `pnpm dev:cart`, `pnpm dev:orders` | Start just one selected application with hot reload. Run `pnpm local:infra` first when its dependencies are needed. |
+| `pnpm test:local` | Test the local-environment orchestration safeguards. |
 | `pnpm build` | Build all workspace packages/apps through Turbo. |
 | `pnpm lint` | Lint all workspace packages/apps through Turbo. |
 | `pnpm test` | Run all workspace test suites through Turbo. |
