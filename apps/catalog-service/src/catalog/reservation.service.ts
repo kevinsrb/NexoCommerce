@@ -9,6 +9,7 @@ const include = { lines: { orderBy: { variantId: 'asc' as const } } };
 type Reservation = Prisma.StockReservationGetPayload<{ include: typeof include }>;
 type Transaction = Prisma.TransactionClient;
 const nonterminal = (row: Reservation) => row.state === 'ACTIVE' || row.state === 'PUBLISHED';
+const transactionOptions = { maxWait: 10_000, timeout: 10_000 };
 const present = (row: Reservation) => ({
   reservationId: row.id,
   attemptId: row.attemptId,
@@ -138,7 +139,7 @@ export class ReservationService {
           data: { reserved: { increment: line.quantity } },
         });
       return present(row);
-    });
+    }, transactionOptions);
   }
 
   async publish(attemptId: string, orderId: string) {
@@ -156,7 +157,7 @@ export class ReservationService {
       return changed
         ? tx.stockReservation.findUniqueOrThrow({ where: { id: current.id }, include })
         : this.finish(tx, current, 'EXPIRED');
-    });
+    }, transactionOptions);
     // Throw outside the transaction so an authoritative expiry is committed.
     if (row.state === 'EXPIRED')
       throw new CatalogDomainException('RESERVATION_EXPIRED', 'Reservation expired', 409);
@@ -175,7 +176,7 @@ export class ReservationService {
       if (!row)
         throw new CatalogDomainException('RESERVATION_NOT_FOUND', 'Reservation not found', 404);
       return present(await this.expireIfDue(tx, row));
-    });
+    }, transactionOptions);
   }
 
   async release(attemptId: string) {
@@ -185,7 +186,7 @@ export class ReservationService {
         throw new CatalogDomainException('RESERVATION_NOT_FOUND', 'Reservation not found', 404);
       const current = await this.expireIfDue(tx, row);
       return present(nonterminal(current) ? await this.finish(tx, current, 'RELEASED') : current);
-    });
+    }, transactionOptions);
   }
 
   async expireDue() {
