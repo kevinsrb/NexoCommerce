@@ -69,7 +69,9 @@ export class InternalServiceProxy {
     if (!originalUrl.startsWith('/') || originalUrl.startsWith('//') || originalUrl.includes('\\')) {
       throw new BadRequestException('Invalid request target');
     }
-    const internalPath = originalUrl.replace(/^\/api(?=\/|$)/, '');
+    const internalPath = service === 'orders'
+      ? originalUrl.replace(/^\/api\/checkout(?=\?|$)/, '/internal/v1/checkouts')
+      : originalUrl.replace(/^\/api(?=\/|$)/, '');
     if (!internalPath.startsWith('/') || internalPath.startsWith('//')) {
       throw new BadRequestException('Invalid request target');
     }

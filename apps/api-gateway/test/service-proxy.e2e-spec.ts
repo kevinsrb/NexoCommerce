@@ -266,7 +266,7 @@ describe('API Gateway service proxy', () => {
     expect(ordersRequests.at(-1)).toEqual(
       expect.objectContaining({
         method: 'POST',
-        url: '/checkout',
+        url: '/internal/v1/checkouts',
         headers: expect.objectContaining({
           authorization,
           'idempotency-key': key,
