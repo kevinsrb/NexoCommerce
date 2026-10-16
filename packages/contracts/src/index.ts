@@ -69,3 +69,41 @@ export interface CheckoutResponse {
   publicationRevision: number;
   lines: CheckoutLineSnapshot[];
 }
+
+export interface CheckoutRequest {
+  expectedPrices: CheckoutPriceExpectation[];
+}
+
+export interface CheckoutProcessingResponse {
+  code: 'CHECKOUT_PROCESSING';
+  message: string;
+  request_id: string;
+}
+
+export interface CartCheckoutSnapshot {
+  version: number;
+  lines: Array<{ variantId: string; quantity: number }>;
+}
+
+export interface CheckoutCatalogVariant extends CheckoutPriceExpectation {
+  sellable: boolean;
+  available: number;
+}
+
+export interface CatalogReservationLine {
+  variantId: string;
+  quantity: number;
+  expected_price_decimal: string;
+  expected_currency: string;
+}
+
+export interface CatalogReservation {
+  reservationId: string;
+  attemptId: string;
+  state: 'ACTIVE' | 'PUBLISHED' | 'EXPIRED' | 'RELEASED';
+  reservedAt: string;
+  expiresAt: string;
+  boundOrderId: string | null;
+  publicationRevision: number | null;
+  lines: Array<Omit<CheckoutLineSnapshot, 'line_total_decimal'>>;
+}

@@ -32,6 +32,13 @@ model CheckoutAttempt {
   principalId    String               @map("principal_id")
   idempotencyKey String               @map("idempotency_key")
   requestHash    String               @map("request_hash")
+  expectedPrices Json                @map("expected_prices")
+  requestId      String              @map("request_id")
+  cartLines      Json?               @map("cart_lines")
+  failure        Json?
+  leaseOwner     String?             @map("lease_owner") @db.Uuid
+  leaseUntil     DateTime?           @map("lease_until")
+  recoverAfter   DateTime            @default(now()) @map("recover_after")
   cartVersion    BigInt?              @map("cart_version")
   cartClaimRef   String?              @map("cart_claim_ref")
   preparedLines  Json?                @map("prepared_lines")
@@ -44,6 +51,7 @@ model CheckoutAttempt {
   order          Order?
 
   @@unique([principalId, idempotencyKey])
+  @@index([state, recoverAfter])
   @@map("checkout_attempts")
 }
 
@@ -54,7 +62,7 @@ model Order {
   cartVersion                BigInt           @map("cart_version")
   state                      OrderRecordState @default(RECORDING)
   currency                   String           @db.VarChar(3)
-  totalDecimal               Decimal          @map("total_decimal") @db.Decimal(38, 18)
+  totalDecimal               String           @map("total_decimal") @db.VarChar(100)
   expiresAt                  DateTime         @map("expires_at")
   catalogPublicationRevision BigInt?          @map("catalog_publication_revision")
   publishedAt                DateTime?        @map("published_at")
@@ -64,7 +72,8 @@ model Order {
   checkoutAttempt            CheckoutAttempt  @relation(fields: [checkoutAttemptId], references: [id], onDelete: Restrict)
   lines                      OrderLine[]
 
-  @@unique([principalId, cartVersion])
+  // Migration owns the partial unique index: only unpublished EXPIRED records
+  // are excluded, since releasing their Cart claim preserves the cart version.
   @@map("orders")
 }
 
@@ -73,8 +82,8 @@ model OrderLine {
   orderId          String  @map("order_id") @db.Uuid
   variantId        String  @map("variant_id") @db.Uuid
   quantity         Int
-  unitPriceDecimal Decimal @map("unit_price_decimal") @db.Decimal(38, 18)
-  lineTotalDecimal Decimal @map("line_total_decimal") @db.Decimal(38, 18)
+  unitPriceDecimal String  @map("unit_price_decimal") @db.VarChar(100)
+  lineTotalDecimal String  @map("line_total_decimal") @db.VarChar(100)
   currency         String  @db.VarChar(3)
   variantSnapshot  Json    @map("variant_snapshot")
   order            Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)

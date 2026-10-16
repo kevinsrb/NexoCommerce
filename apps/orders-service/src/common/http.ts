@@ -12,6 +12,7 @@ import { createLogger, withRequestContext } from '@nexo/logger';
 import { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { Prisma } from '../../generated/client';
+import { CheckoutDomainException } from './checkout-domain.exception';
 
 const logger = createLogger('orders-service');
 type ContextRequest = Request & { requestId?: string };
@@ -35,8 +36,39 @@ class HttpExceptionFilter implements ExceptionFilter {
       error instanceof Prisma.PrismaClientKnownRequestError
         ? { P2002: 409, P2003: 400, P2025: 404 }[error.code]
         : undefined;
-    const statusCode = databaseError ??
-      (isPayloadTooLargeError(error) ? 413 : error instanceof HttpException ? error.getStatus() : 500);
+    const statusCode =
+      databaseError ??
+      (isPayloadTooLargeError(error)
+        ? 413
+        : error instanceof HttpException
+          ? error.getStatus()
+          : 500);
+    if (request.path.startsWith('/internal/v1/checkouts')) {
+      const known = error instanceof CheckoutDomainException;
+      const checkoutStatus = known || (statusCode < 500 && !databaseError) ? statusCode : 503;
+      response.status(checkoutStatus).json({
+        code: known
+          ? error.code
+          : ((
+              {
+                400: 'INVALID_REQUEST',
+                401: 'UNAUTHENTICATED',
+                403: 'FORBIDDEN',
+                413: 'INVALID_REQUEST',
+              } as Record<number, string>
+            )[checkoutStatus] ?? 'DEPENDENCY_UNAVAILABLE'),
+        message: known
+          ? error.message
+          : statusCode === 401
+            ? 'Authentication required'
+            : checkoutStatus < 500
+              ? 'Invalid request'
+              : 'Checkout unavailable',
+        request_id: request.requestId ?? 'unknown',
+        ...(known && error.details ? { details: error.details } : {}),
+      });
+      return;
+    }
     const codes: Record<number, string> = {
       400: 'BAD_REQUEST',
       401: 'UNAUTHORIZED',
@@ -55,13 +87,13 @@ class HttpExceptionFilter implements ExceptionFilter {
             ? 'Bad request'
             : statusCode === 413
               ? 'Payload too large'
-            : databaseError
-              ? statusCode === 409
-                ? 'Resource already exists'
-                : 'Resource not found'
-              : error instanceof HttpException
-                ? error.message
-                : 'Request failed',
+              : databaseError
+                ? statusCode === 409
+                  ? 'Resource already exists'
+                  : 'Resource not found'
+                : error instanceof HttpException
+                  ? error.message
+                  : 'Request failed',
       requestId: request.requestId ?? 'unknown',
     };
     response.status(statusCode).json(body);
