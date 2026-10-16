@@ -1,6 +1,6 @@
 # Nexo Commerce — Agent coordination
 
-Last updated: 2026-09-30
+Last updated: 2026-10-15
 
 ## Baseline and dependency graph
 
@@ -35,7 +35,7 @@ shared status file; they report status and findings to the coordinator.
 
 | Agent | Phase | Branch | Status | Depends On |
 | --- | --- | --- | --- | --- |
-| Atlas | 3 | `phase-3-orders` | DESIGN | `main` |
+| Atlas | 3 | `phase-3-orders` | READY FOR REVIEW — local validation complete; unmerged | `main` |
 | Hermes | 4 | `phase-4-events` | BLOCKED | Atlas integrated |
 | Mercury | 5 | `phase-5-payments` | BLOCKED | Hermes integrated |
 | Echo | 6 | `phase-6-notifications` | BLOCKED | Mercury and event contracts |

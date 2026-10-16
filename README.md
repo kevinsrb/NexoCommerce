@@ -1,6 +1,6 @@
 # Nexo Commerce
 
-Nexo Commerce is a TypeScript monorepo for an evolving commerce platform. Phase 2 extends the Phase 1 foundation with an authenticated Redis-backed Cart service, Gateway-only cart traffic, current Catalog validation, and a minimal storefront cart experience.
+Nexo Commerce is a TypeScript monorepo for an evolving commerce platform. Phase 3 adds durable, idempotent checkout orchestration and Catalog-owned inventory reservations to the Phase 1/2 Gateway, Catalog, and Redis Cart foundation.
 
 ## Architecture
 
@@ -10,8 +10,11 @@ flowchart LR
   Gateway -->|internal service calls| Auth[apps/auth-service\nNestJS + Express]
   Gateway -->|internal service calls| Catalog[apps/catalog-service\nNestJS + Express]
   Gateway -->|internal service calls| Cart[apps/cart-service\nNestJS + Express]
-  Cart -->|cart:userId| Redis[(Redis 7)]
+  Gateway -->|internal service calls| Orders[apps/orders-service\nNestJS + Express]
+  Cart -->|principal-scoped Cart state| Redis[(Redis 7)]
   Cart -->|internal batch lookup| Catalog
+  Orders -->|private Cart claims| Cart
+  Orders -->|private inventory reservations| Catalog
 
   Gateway --> Shared[packages/contracts\npackages/config\npackages/logger]
   Auth --> Shared
@@ -20,13 +23,15 @@ flowchart LR
   subgraph Postgres[PostgreSQL 16 container]
     AuthDB[(auth_db)]
     CatalogDB[(catalog_db)]
+    OrderDB[(order_db)]
   end
 
   Auth --> AuthDB
   Catalog --> CatalogDB
+  Orders --> OrderDB
 ```
 
-Browser-facing application traffic goes only to the API Gateway, which is the entry point for Auth, Catalog, and Cart. The Gateway forwards the existing Auth, Product, Category, and Cart HTTP routes to their owning services using internal REST URLs. Auth, Catalog, and Cart are not browser API entry points; their direct local ports exist for service development and diagnostics only.
+Browser-facing application traffic goes only to the API Gateway, which is the entry point for Auth, Catalog, Cart, and Orders. The Gateway forwards the existing Auth, Product, Category, Cart, and Checkout HTTP routes to their owning services using internal REST URLs. Auth, Catalog, Cart, and Orders are not browser API entry points; their direct local ports exist for service development and diagnostics only.
 
 ## Stack
 
@@ -46,6 +51,7 @@ NexoCommerce/
 │   ├── auth-service/      # Auth API and private Prisma schema/migrations
 │   ├── catalog-service/   # Catalog API and private Prisma schema/migrations
 │   ├── cart-service/      # authenticated Redis-backed temporary cart
+│   ├── orders-service/    # durable checkout attempts and order snapshots
 │   └── web/               # Next.js storefront shell
 ├── packages/
 │   ├── config/            # Zod runtime environment parsers
@@ -73,16 +79,21 @@ Copy-Item apps\api-gateway\.env.example apps\api-gateway\.env
 Copy-Item apps\auth-service\.env.example apps\auth-service\.env
 Copy-Item apps\catalog-service\.env.example apps\catalog-service\.env
 Copy-Item apps\cart-service\.env.example apps\cart-service\.env
+Copy-Item apps\orders-service\.env.example apps\orders-service\.env
 Copy-Item apps\web\.env.example apps\web\.env
 pnpm db:up
 pnpm auth:prisma:generate
 pnpm catalog:prisma:generate
+pnpm orders:prisma:generate
 pnpm auth:prisma:migrate
 pnpm catalog:prisma:migrate
+pnpm orders:prisma:migrate
+# Required once when upgrading a Phase 2 Redis dataset; stop Cart writes first.
+pnpm --filter @nexo/cart-service migrate:keys
 pnpm dev
 ```
 
-`pnpm db:up` starts PostgreSQL and Redis using the root `.env`. On a new Compose volume, PostgreSQL's init script creates `auth_db` and `catalog_db`; migrations then create the service-owned tables. Do not start the applications against an un-migrated database if you intend to use database-backed routes. `pnpm dev` starts the storefront on 3000, API gateway on 3003, Auth on 3001, Catalog on 3002, and Cart on 3004. The backend applications load their own app-local `.env` files; the web development server uses its default port 3000.
+`pnpm db:up` starts PostgreSQL and Redis using the root `.env`. On a new Compose volume, PostgreSQL's init script creates `auth_db`, `catalog_db`, and `order_db`; migrations then create the service-owned tables. Apply the Catalog and Orders migrations before enabling checkout. The Redis key migration is only for a non-empty Phase 2 dataset; it atomically moves each valid `cart:{principalId}` payload to the Phase 3 keys and seeds its persistent counter. Do not start the applications against an un-migrated database if you intend to use database-backed routes. `pnpm dev` starts the storefront on 3000, API gateway on 3003, Auth on 3001, Catalog on 3002, Cart on 3004, and Orders on 3005. The backend applications load their own app-local `.env` files; the web development server uses its default port 3000.
 
 After startup, the local addresses are:
 
@@ -92,6 +103,7 @@ After startup, the local addresses are:
 - Auth health (direct local diagnostic only; not a browser API entry point): `http://localhost:3001/health`
 - Catalog health (direct local diagnostic only; not a browser API entry point): `http://localhost:3002/health`
 - Cart health (direct local diagnostic only; not a browser API entry point): `http://localhost:3004/health`
+- Orders health (direct local diagnostic only; not a browser API entry point): `http://localhost:3005/health`
 
 The health endpoints are liveness checks and intentionally do not query PostgreSQL. A successful health response is not evidence that migrations have been applied or that a live database operation has succeeded.
 
@@ -101,14 +113,15 @@ Copy each example file rather than committing a real `.env` file. The validation
 
 | Location | Variables | Purpose/default |
 | --- | --- | --- |
-| `.env` | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`, `REDIS_PORT` | Compose credentials and host ports. Defaults in `.env.example`: `nexo`, `nexo_local_password`, `5432`, `6379`. |
-| `apps/api-gateway/.env` | `NODE_ENV`, `PORT`, `AUTH_SERVICE_URL`, `CATALOG_SERVICE_URL`, `CART_SERVICE_URL` | Gateway runtime; `PORT=3003`. The service URLs are required internal REST origins (the local examples use the Auth, Catalog, and Cart ports). `NODE_ENV` accepts `development`, `test`, or `production`. |
+| `.env` | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`, `REDIS_PORT` | Compose credentials and host ports. Defaults in `.env.example`: `nexo`, `nexo_local_password`, `5432`, `6379`. The service URLs/tokens in that example are shared local values, not Compose configuration. |
+| `apps/api-gateway/.env` | `NODE_ENV`, `PORT`, `AUTH_SERVICE_URL`, `CATALOG_SERVICE_URL`, `CART_SERVICE_URL`, `ORDERS_SERVICE_URL`, `CHECKOUT_ENABLED` | Gateway runtime; `PORT=3003`. The service URLs are required internal REST origins (the local examples use ports 3001/3002/3004/3005). `CHECKOUT_ENABLED` defaults to `false`; set it explicitly to `true` only after the Catalog, Orders, and Cart migrations/health checks are complete. `NODE_ENV` accepts `development`, `test`, or `production`. |
 | `apps/auth-service/.env` | `NODE_ENV`, `PORT`, `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `CATALOG_ADMIN_SECRET`, `JWT_ACCESS_TTL_SECONDS`, `JWT_REFRESH_TTL_SECONDS` | Auth runtime; `PORT=3001`, PostgreSQL `auth_db`, TTL defaults of 900/604800 seconds, and a separate secret for the signed Catalog ADMIN proof. JWT secrets must be at least 32 characters and different. |
-| `apps/catalog-service/.env` | `NODE_ENV`, `PORT`, `DATABASE_URL`, `JWT_ACCESS_SECRET`, `CATALOG_INTERNAL_TOKEN`, `CATALOG_ADMIN_SECRET` | Catalog runtime; `PORT=3002`, PostgreSQL `catalog_db`, Auth-compatible access secret, Cart-to-Catalog service credential, and the Auth-only ADMIN proof secret. |
-| `apps/cart-service/.env` | `NODE_ENV`, `PORT`, `REDIS_URL`, `CATALOG_SERVICE_URL`, `JWT_ACCESS_SECRET`, `CATALOG_INTERNAL_TOKEN` | Cart runtime; `PORT=3004`, Redis, Catalog's internal origin, Auth-compatible access secret, and the credential sent to Catalog. Cart has no PostgreSQL database. |
+| `apps/catalog-service/.env` | `NODE_ENV`, `PORT`, `DATABASE_URL`, `JWT_ACCESS_SECRET`, `CATALOG_INTERNAL_TOKEN`, `CATALOG_ADMIN_SECRET` | Catalog runtime; `PORT=3002`, PostgreSQL `catalog_db`, Auth-compatible access secret, Orders/Cart-to-Catalog service credential, and the Auth-only ADMIN proof secret. |
+| `apps/cart-service/.env` | `NODE_ENV`, `PORT`, `REDIS_URL`, `CATALOG_SERVICE_URL`, `JWT_ACCESS_SECRET`, `CATALOG_INTERNAL_TOKEN`, `CART_INTERNAL_SERVICE_TOKEN` | Cart runtime; `PORT=3004`, Redis, Catalog's internal origin, Auth-compatible access secret, Catalog credential, and the distinct Orders-to-Cart credential. Cart has no PostgreSQL database. |
+| `apps/orders-service/.env` | `NODE_ENV`, `PORT`, `DATABASE_URL`, `CART_SERVICE_URL`, `CATALOG_SERVICE_URL`, `JWT_ACCESS_SECRET`, `CART_INTERNAL_SERVICE_TOKEN`, `CATALOG_INTERNAL_TOKEN` | Orders runtime; `PORT=3005`, PostgreSQL `order_db`, internal Cart/Catalog origins, local Auth-compatible JWT secret, and distinct private service credentials. |
 | `apps/web/.env` | `NEXT_PUBLIC_API_GATEWAY_URL` | Required public browser API origin; the local example is `http://localhost:3003/api`. The storefront uses it for Catalog data and does not know a Catalog Service URL. |
 
-Normal Gateway starts load the `.env` in its application directory with `dotenv`; Auth, Catalog, and Cart use `dotenv/config` for the same app-local behavior. Prisma operations need `DATABASE_URL` too. The root alias commands below run Prisma from the relevant service and read that service’s `.env`; use the explicit environment setup only when validating a schema directly from the root:
+Normal Gateway starts load the `.env` in its application directory with `dotenv`; Auth, Catalog, Cart, and Orders use `dotenv/config` for the same app-local behavior. Prisma operations need `DATABASE_URL` too. The root alias commands below run Prisma from the relevant service and read that service’s `.env`; use the explicit environment setup only when validating a schema directly from the root:
 
 ```powershell
 # Auth schema validation from the repository root (does not contact PostgreSQL)
@@ -120,9 +133,14 @@ Remove-Item Env:DATABASE_URL
 $env:DATABASE_URL = 'postgresql://nexo:nexo_local_password@localhost:5432/catalog_db'
 pnpm --filter @nexo/catalog-service exec prisma validate --schema prisma/schema.prisma
 Remove-Item Env:DATABASE_URL
+
+# Orders schema validation from the repository root (does not contact PostgreSQL)
+$env:DATABASE_URL = 'postgresql://nexo:nexo_local_password@localhost:5432/order_db'
+pnpm --filter @nexo/orders-service exec prisma validate --schema prisma/schema.prisma
+Remove-Item Env:DATABASE_URL
 ```
 
-Run `pnpm auth:prisma:migrate` and `pnpm catalog:prisma:migrate` only after PostgreSQL is running, against the intended local service database. They use committed migrations and do contact the database.
+Run `pnpm auth:prisma:migrate`, `pnpm catalog:prisma:migrate`, and `pnpm orders:prisma:migrate` only after PostgreSQL is running, against their intended local service databases. They use committed migrations and do contact the database.
 
 ## Commands
 
@@ -130,7 +148,7 @@ Run these root commands from the repository root:
 
 | Command | Meaning |
 | --- | --- |
-| `pnpm dev` | Run all workspace development scripts through Turbo: Web 3000, Gateway 3003, Auth 3001, Catalog 3002, and Cart 3004 with copied app-local environment files. |
+| `pnpm dev` | Run all workspace development scripts through Turbo: Web 3000, Gateway 3003, Auth 3001, Catalog 3002, Cart 3004, and Orders 3005 with copied app-local environment files. |
 | `pnpm build` | Build all workspace packages/apps through Turbo. |
 | `pnpm lint` | Lint all workspace packages/apps through Turbo. |
 | `pnpm test` | Run all workspace test suites through Turbo. |
@@ -141,6 +159,9 @@ Run these root commands from the repository root:
 | `pnpm auth:prisma:migrate` | Apply committed Auth migrations to the configured `auth_db`. |
 | `pnpm catalog:prisma:generate` | Generate the Catalog service Prisma client. |
 | `pnpm catalog:prisma:migrate` | Apply committed Catalog migrations to the configured `catalog_db`. |
+| `pnpm orders:prisma:generate` | Generate the Orders service Prisma client. |
+| `pnpm orders:prisma:migrate` | Apply committed Orders migrations to the configured `order_db`. |
+| `pnpm --filter @nexo/cart-service migrate:keys` | Atomically migrate valid legacy Phase 2 Redis Cart keys; run with Cart writes stopped. |
 
 Useful individual commands:
 
@@ -150,6 +171,7 @@ pnpm --filter @nexo/api-gateway start:dev
 pnpm --filter @nexo/auth-service dev
 pnpm --filter @nexo/catalog-service dev
 pnpm --filter @nexo/cart-service dev
+pnpm --filter @nexo/orders-service dev
 
 pnpm --filter @nexo/web build
 pnpm --filter @nexo/api-gateway test
@@ -161,17 +183,20 @@ pnpm --filter @nexo/catalog-service lint
 
 | Service | Owns | Routes |
 | --- | --- | --- |
-| API gateway | Public HTTP entry point; no service persistence | `GET /api/health`, Swagger at `/api/docs`, Auth/Catalog routes, and `GET /api/cart`, `POST /api/cart/items`, `PATCH /api/cart/items/:variantId`, `DELETE /api/cart/items/:variantId`, `DELETE /api/cart` |
+| API gateway | Public HTTP entry point; no service persistence | `GET /api/health`, Swagger at `/api/docs`, Auth/Catalog/Cart routes, and `POST /api/checkout` |
 | Auth service | `auth_db`, `User`, and `RefreshToken` data | Internal target for Gateway: `GET /health`, `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `GET /auth/me` |
-| Catalog service | `catalog_db`, `Category`, `Product`, and `ProductVariant` data | Internal target for Gateway: `GET /health`, `GET /products`, `GET /products/:slug`, `GET /categories`, `POST /categories`, `POST /products`, `PATCH /products/:id` |
-| Cart service | Redis keys `cart:{userId}`; temporary currency, variant IDs, quantities, and timestamp | Direct diagnostics: `GET /health`; authenticated internal API: `GET /cart`, `POST /cart/items`, `PATCH /cart/items/:variantId`, `DELETE /cart/items/:variantId`, `DELETE /cart` |
-| Web | Storefront presentation and public Gateway client | Product states from `GET /api/products`; Gateway-backed cart at `/cart` |
+| Catalog service | `catalog_db`, products, variants, inventory, and stock reservations | Internal target for Gateway: product/category routes; private Cart/Orders variant and reservation APIs |
+| Cart service | Redis `cart:data:{principalId}`, durable `cart:version:{principalId}`, and checkout claims | Direct diagnostics: `GET /health`; Gateway-proxied Cart routes and Orders-only claim operations |
+| Orders service | `order_db`, checkout attempts, immutable order/line snapshots, and recovery progress | Direct diagnostics: `GET /health`; Gateway target only at `POST /internal/v1/checkouts` |
+| Web | Storefront presentation and public Gateway client | Product states from `GET /api/products`; Gateway-backed cart and checkout at `/cart` |
 
 All backends use NestJS with Express. They apply Helmet, global DTO validation (`whitelist`, transformation, and rejection of unknown properties), request IDs, structured completion logging, and public error envelopes shaped as `{ statusCode, code, message, requestId }`. The Gateway alone enables browser CORS and forwards the request ID, `Authorization`, `Accept`, `Content-Type`, method, query string, and JSON body to its internal targets. An unavailable internal service becomes a Gateway `503 SERVICE_UNAVAILABLE` envelope without target details. Runtime errors do not expose database details or stack traces. Auth hashes passwords and refresh tokens with Argon2; its access and refresh JWTs use separate secrets.
 
-Cart validates Auth access JWTs locally, stores only temporary Redis state with a 30-day TTL renewed by mutations, and batch-validates current variant state through Catalog. Cart-to-Catalog calls send the configured service credential and preserve the Gateway request ID. Catalog administration additionally requires an Auth-issued ADMIN proof signed with the separate `CATALOG_ADMIN_SECRET`, which Cart never receives. A Cart has one currency, uses current Catalog prices, does not reserve or decrement stock, and never writes to PostgreSQL. Redis operational failures return `503 CART_STORAGE_UNAVAILABLE`.
+Cart validates Auth access JWTs locally, stores a principal-scoped Cart with a non-reusable version and active checkout claim in Redis, and batch-validates current variant state through Catalog. Cart-to-Catalog calls send the configured service credential and preserve the Gateway request ID. Catalog administration additionally requires an Auth-issued ADMIN proof signed with the separate `CATALOG_ADMIN_SECRET`, which Cart never receives. A Cart has one currency and uses current Catalog prices. A live checkout claim prevents Cart edits; Orders alone can complete or release it using `CART_INTERNAL_SERVICE_TOKEN`.
 
-Catalog's `POST /categories`, `POST /products`, and `PATCH /products/:id` require an Auth-issued ADMIN JWT through the Gateway. Public Catalog GET routes remain unauthenticated.
+Catalog's `POST /categories`, `POST /products`, `PATCH /products/:id`, and `PATCH /variants/:variantId/stock` require an Auth-issued ADMIN JWT through the Gateway. Public Catalog GET routes remain unauthenticated. Catalog alone owns available inventory (`onHand - reserved`) and atomically creates, publishes, releases, and expires reservations. Orders owns idempotency and snapshots but does not mutate Catalog stock.
+
+For checkout, the browser submits the displayed decimal prices to `POST /api/checkout` with a JWT and `Idempotency-Key`. Gateway validates/generates `x-request-id`, forwards it with the JWT/key to `POST /internal/v1/checkouts` in Orders, and Orders propagates the same request ID to Cart and Catalog. A first accepted publication returns `201 PENDING`; same-key replay returns `200` with the order's current `PENDING` or `EXPIRED` state; uncertain recovery returns `202 CHECKOUT_PROCESSING`. Price, Cart-version, stock, or reservation conflicts are explicit 409/422 responses. See [Phase 3 architecture and E2E runbook](docs/architecture/phase-3.md).
 
 ## Technical decisions
 
@@ -179,19 +204,21 @@ Catalog's `POST /categories`, `POST /products`, and `PATCH /products/:id` requir
 - [ADR 002: logical database per service](docs/adr/002-database-per-service.md)
 - [ADR 003: NestJS with Express](docs/adr/003-nestjs-express.md)
 - [Phase 1 architecture](docs/architecture/phase-1.md)
+- [Phase 2 architecture](docs/architecture/phase-2.md)
+- [Phase 3 architecture and runbook](docs/architecture/phase-3.md)
 
-## Phase 1 limits
+## Phase 3 limits
 
-Phase 1 intentionally excludes orders, checkout/payments, notifications/messaging, service-to-service authorization, Kubernetes, Terraform, and production deployment. Phase 2 adds the Cart service but intentionally does not add inventory reservation, Orders, checkout, payments, or asynchronous messaging. PostgreSQL database separation is logical: both databases run in the same local Compose PostgreSQL instance for development, while schemas, migrations, generated clients, and persistence code remain private to their owner services.
+Phase 3 intentionally excludes payment authorization/capture, tax, discounts, shipping, fulfillment, returns, public order-management APIs, inventory receiving, notifications, message brokers, and cross-service distributed transactions. Checkout does not confirm an order: its visible state is `PENDING` until its Catalog reservation expires. PostgreSQL separation remains logical: `auth_db`, `catalog_db`, and `order_db` share one local PostgreSQL 16 container, while schemas, migrations, generated clients, and persistence code remain private to their owners.
 
 ## Roadmap
 
 1. **Phase 1 — Foundation and integration:** this monorepo, local infrastructure, independent Auth/Catalog ownership, the Gateway public boundary, and catalog-backed storefront browsing.
 2. **Phase 2 — Cart:** authenticated Redis-backed cart, Gateway-only access, and current Catalog validation.
-3. **Phase 3 — Checkout:** model checkout orchestration on top of cart state.
-4. **Phase 4 — Orders and payments:** add order lifecycle and payment-provider integration.
-5. **Phase 5 — Asynchronous capabilities:** add notifications, background work, and messaging use cases.
+3. **Phase 3 — Checkout and inventory reservations:** durable idempotent checkout, Cart claims, and Catalog-owned 15-minute reservations.
+4. **Phase 4 — Events:** consider asynchronous integration only when a concrete need is approved.
+5. **Phase 5 — Payments:** add payment-provider integration and any future confirmation transition.
 6. **Phase 6 — Operations:** add observability, deployment automation, Kubernetes/Terraform where justified, and production hardening.
 7. **Phase 7 — Scale and resilience:** evolve performance, reliability, security review, and multi-service operational practices from production evidence.
 
-See [docs/architecture/phase-1.md](docs/architecture/phase-1.md) and [docs/architecture/phase-2.md](docs/architecture/phase-2.md) for the detailed architecture boundaries.
+See the [Phase 1](docs/architecture/phase-1.md), [Phase 2](docs/architecture/phase-2.md), and [Phase 3](docs/architecture/phase-3.md) architecture notes for detailed boundaries.

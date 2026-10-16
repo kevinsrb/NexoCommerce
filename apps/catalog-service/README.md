@@ -22,6 +22,8 @@ uses the validated Catalog environment parser. `DATABASE_URL` must use PostgreSQ
 | POST | `/categories` | Creates a category from `name` and unique lowercase `slug`; requires an ADMIN Auth JWT |
 | POST | `/products` | Creates a product and its variants atomically; requires an ADMIN Auth JWT |
 | PATCH | `/products/:id` | Updates supplied product fields by UUID; requires an ADMIN Auth JWT |
+| PATCH | `/variants/:variantId/stock` | Sets `onHand` without crossing `reserved`; requires an ADMIN Auth JWT |
+| DELETE | `/products/:id` | Deletes only when no nonterminal reservation references its variants; requires an ADMIN Auth JWT |
 
 Catalog validates Auth-issued access JWTs locally for the three write endpoints and
 requires the signed `ADMIN` role proof. CUSTOMER and anonymous requests are rejected.
@@ -70,6 +72,14 @@ valid UUID request IDs are propagated and others are replaced. Pino logs one
 completion record with service, request ID, method, path, status, and duration in
 milliseconds. Request bodies, query strings and headers are not logged. Helmet
 and the global validation/error boundary apply to all routes.
+
+## Phase 3 inventory reservations
+
+Catalog owns `onHand`, `reserved`, and durable stock reservations in `catalog_db`; public and internal availability is always `onHand - reserved`. It is the only service that reserves, publishes, releases, or expires stock. A successful internal reservation atomically locks every requested variant, validates sellability/current price/current availability, reserves all lines or none, and computes its own UTC `reservedAt` and exact 15-minute `expiresAt`.
+
+Orders authenticates private variant and reservation calls with `CATALOG_INTERNAL_TOKEN`. The private endpoints under `/internal/v1/` are not Gateway routes: variant lookup, reserve, reservation status, publish-order, and release. Publication is serialized with expiry and records an immutable revision; Catalog releases reserved quantity exactly once for release/expiry. Orders stores references/snapshots but never updates Catalog stock itself.
+
+`PATCH /variants/:variantId/stock` requires an ADMIN JWT and rejects `onHand` below currently reserved inventory. Product deletion and variant replacement are blocked while nonterminal reservations exist. Catalog's expiry worker runs every second outside test mode. No reservation is an order confirmation or stock consumption in Phase 3.
 
 ## Verification
 
