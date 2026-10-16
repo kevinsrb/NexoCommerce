@@ -57,9 +57,11 @@ describe('API Gateway service proxy', () => {
   let authServer: Server;
   let catalogServer: Server;
   let cartServer: Server;
+  let ordersServer: Server;
   let authRequests: ReceivedRequest[];
   let catalogRequests: ReceivedRequest[];
   let cartRequests: ReceivedRequest[];
+  let ordersRequests: ReceivedRequest[];
   const originalAuthServiceUrl = process.env.AUTH_SERVICE_URL;
   const originalCatalogServiceUrl = process.env.CATALOG_SERVICE_URL;
   const originalCartServiceUrl = process.env.CART_SERVICE_URL;
@@ -69,6 +71,7 @@ describe('API Gateway service proxy', () => {
     authRequests = [];
     catalogRequests = [];
     cartRequests = [];
+    ordersRequests = [];
     authServer = createServer(async (incoming, outgoing) => {
       const received = await captureRequest(incoming);
       authRequests.push(received);
@@ -144,11 +147,40 @@ describe('API Gateway service proxy', () => {
           : undefined,
       );
     });
+    ordersServer = createServer(async (incoming, outgoing) => {
+      const received = await captureRequest(incoming);
+      ordersRequests.push(received);
+      if (received.url?.includes('timeout=true')) return;
+      const key = received.headers['idempotency-key'];
+      const status = key === 'checkout-replay' ? 200 : key === 'checkout-processing' ? 202 : 201;
+      json(
+        outgoing,
+        status,
+        status === 202
+          ? {
+              code: 'CHECKOUT_PROCESSING',
+              message: 'Checkout is processing',
+              request_id: received.headers['x-request-id'],
+            }
+          : {
+              orderId: '500c6fcc-154a-4ec3-8a07-5e02b3f04bf4',
+              state: 'PENDING',
+              currency: 'COP',
+              total_decimal: '12.00',
+              expiresAt: '2026-10-15T12:15:00.000Z',
+              publicationRevision: 1,
+              lines: [],
+            },
+        typeof received.headers['x-request-id'] === 'string'
+          ? received.headers['x-request-id']
+          : undefined,
+      );
+    });
 
     process.env.AUTH_SERVICE_URL = await listen(authServer);
     process.env.CATALOG_SERVICE_URL = await listen(catalogServer);
     process.env.CART_SERVICE_URL = await listen(cartServer);
-    process.env.ORDERS_SERVICE_URL = 'http://orders.internal.test';
+    process.env.ORDERS_SERVICE_URL = await listen(ordersServer);
 
     const moduleFixture = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleFixture.createNestApplication<NestExpressApplication>();
@@ -162,6 +194,7 @@ describe('API Gateway service proxy', () => {
     if (authServer.listening) await close(authServer);
     if (catalogServer.listening) await close(catalogServer);
     if (cartServer.listening) await close(cartServer);
+    if (ordersServer.listening) await close(ordersServer);
     if (originalAuthServiceUrl === undefined) delete process.env.AUTH_SERVICE_URL;
     else process.env.AUTH_SERVICE_URL = originalAuthServiceUrl;
     if (originalCatalogServiceUrl === undefined) delete process.env.CATALOG_SERVICE_URL;
@@ -202,6 +235,75 @@ describe('API Gateway service proxy', () => {
     expect(catalogRequests).toEqual([
       expect.objectContaining({ method: 'GET', url: '/products?limit=1&offset=0' }),
     ]);
+  });
+
+  it.each([
+    ['checkout-first', 201],
+    ['checkout-replay', 200],
+    ['checkout-processing', 202],
+  ])('forwards public checkout key %s to Orders with status %i', async (key, status) => {
+    const requestId = 'be8e2c58-22fb-45a5-b68e-bd6f4205d629';
+    const authorization = 'Bearer verified-customer-access-token';
+    const body = {
+      expectedPrices: [
+        {
+          variantId: '2fd17caa-95e4-40af-bd38-d1e844d3c22d',
+          price_decimal: '4.00',
+          currency: 'COP',
+        },
+      ],
+    };
+
+    const response = await request(app.getHttpServer())
+      .post('/api/checkout')
+      .set('authorization', authorization)
+      .set('idempotency-key', key)
+      .set('x-request-id', requestId)
+      .send(body)
+      .expect(status);
+
+    expect(response.headers['x-request-id']).toBe(requestId);
+    expect(ordersRequests.at(-1)).toEqual(
+      expect.objectContaining({
+        method: 'POST',
+        url: '/checkout',
+        headers: expect.objectContaining({
+          authorization,
+          'idempotency-key': key,
+          'x-request-id': requestId,
+        }),
+        body: JSON.stringify(body),
+      }),
+    );
+  });
+
+  it('returns a safe 503 when Orders times out or is unavailable', async () => {
+    const timeout = await request(app.getHttpServer())
+      .post('/api/checkout?timeout=true')
+      .set('authorization', 'Bearer customer')
+      .set('idempotency-key', 'checkout-timeout')
+      .send({ expectedPrices: [] })
+      .expect(503);
+    expect(timeout.body).toEqual({
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Internal service unavailable',
+      requestId: timeout.headers['x-request-id'],
+    });
+
+    await close(ordersServer);
+    const unavailable = await request(app.getHttpServer())
+      .post('/api/checkout')
+      .set('authorization', 'Bearer customer')
+      .set('idempotency-key', 'checkout-unavailable')
+      .send({ expectedPrices: [] })
+      .expect(503);
+    expect(unavailable.body).toEqual({
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Internal service unavailable',
+      requestId: unavailable.headers['x-request-id'],
+    });
   });
 
   it('routes the five public Cart operations to the Cart service with auth, body, query, and request ID', async () => {

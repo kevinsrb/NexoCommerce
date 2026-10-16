@@ -63,7 +63,7 @@ describe('API gateway HTTP boundary', () => {
     await request(app.getHttpServer()).get('/docs').expect(404);
   });
 
-  it('documents the public Auth, Catalog, and Cart proxy routes without Catalog internal routes', async () => {
+  it('documents the public Auth, Catalog, Cart, and Checkout proxy routes without internal routes', async () => {
     const response = await request(app.getHttpServer()).get('/api/docs-json').expect(200);
 
     expect(response.body.paths).toEqual(
@@ -77,9 +77,22 @@ describe('API gateway HTTP boundary', () => {
           patch: expect.any(Object),
           delete: expect.any(Object),
         }),
+        '/api/checkout': expect.objectContaining({ post: expect.any(Object) }),
+      }),
+    );
+    expect(response.body.paths['/api/checkout'].post).toEqual(
+      expect.objectContaining({
+        summary: 'Checkout through the Orders Service',
+        responses: expect.objectContaining({
+          '201': expect.any(Object),
+          '200': expect.any(Object),
+          '202': expect.any(Object),
+          '503': expect.any(Object),
+        }),
       }),
     );
     expect(response.body.paths['/api/internal/variants/batch']).toBeUndefined();
+    expect(response.body.paths['/api/internal/v1/checkouts']).toBeUndefined();
   });
 
   it('does not route Catalog internal endpoints through the public gateway', async () => {

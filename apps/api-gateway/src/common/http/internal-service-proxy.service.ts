@@ -7,9 +7,9 @@ import {
 } from '../environment';
 import { getRequestId } from './request-id.types';
 
-export type InternalService = 'auth' | 'catalog' | 'cart';
+export type InternalService = 'auth' | 'catalog' | 'cart' | 'orders';
 
-const forwardedHeaders = ['accept', 'authorization', 'content-type'] as const;
+const forwardedHeaders = ['accept', 'authorization', 'content-type', 'idempotency-key'] as const;
 
 @Injectable()
 export class InternalServiceProxy {
@@ -21,22 +21,27 @@ export class InternalServiceProxy {
     request: Request,
     response: Response,
     service: InternalService,
+    body: unknown = request.body,
   ): Promise<void> {
     try {
-      const upstream = await this.requestUpstream(request, service);
+      const upstream = await this.requestUpstream(request, service, body);
       const contentType = upstream.headers.get('content-type');
-      const body = Buffer.from(await upstream.arrayBuffer());
-      if (this.isJsonContentType(contentType)) JSON.parse(body.toString('utf8'));
+      const responseBody = Buffer.from(await upstream.arrayBuffer());
+      if (this.isJsonContentType(contentType)) JSON.parse(responseBody.toString('utf8'));
       if (contentType) response.setHeader('content-type', contentType);
 
-      response.status(upstream.status).send(body);
+      response.status(upstream.status).send(responseBody);
     } catch (error) {
       if (error instanceof BadRequestException) throw error;
       throw new ServiceUnavailableException('Internal service unavailable');
     }
   }
 
-  private async requestUpstream(request: Request, service: InternalService): Promise<globalThis.Response> {
+  private async requestUpstream(
+    request: Request,
+    service: InternalService,
+    body: unknown,
+  ): Promise<globalThis.Response> {
     const headers = new Headers();
     for (const header of forwardedHeaders) {
       const value = request.header(header);
@@ -48,18 +53,18 @@ export class InternalServiceProxy {
     return fetch(this.targetUrl(request, service), {
       method: request.method,
       headers,
-      ...(hasBody ? { body: JSON.stringify(request.body) } : {}),
+      ...(hasBody ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(5_000),
     });
   }
 
   private targetUrl(request: Request, service: InternalService): URL {
-    const serviceUrl =
-      service === 'auth'
-        ? this.environment.AUTH_SERVICE_URL
-        : service === 'catalog'
-          ? this.environment.CATALOG_SERVICE_URL
-          : this.environment.CART_SERVICE_URL;
+    const serviceUrl = {
+      auth: this.environment.AUTH_SERVICE_URL,
+      catalog: this.environment.CATALOG_SERVICE_URL,
+      cart: this.environment.CART_SERVICE_URL,
+      orders: this.environment.ORDERS_SERVICE_URL,
+    }[service];
     const originalUrl = request.originalUrl;
     if (!originalUrl.startsWith('/') || originalUrl.startsWith('//') || originalUrl.includes('\\')) {
       throw new BadRequestException('Invalid request target');

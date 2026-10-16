@@ -35,6 +35,7 @@ export const configureSwagger = (app: NestExpressApplication): void => {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Nexo Commerce API Gateway')
     .setVersion('1.0')
+    .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
 

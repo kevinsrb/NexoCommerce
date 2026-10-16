@@ -1,5 +1,13 @@
-import { Controller, Delete, Get, Patch, Post, Req, Res } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, Patch, Post, Req, Res } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiHeader,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { type CheckoutRequest } from '@nexo/contracts';
 import { type Request, type Response } from 'express';
 
 import { InternalServiceProxy, type InternalService } from './internal-service-proxy.service';
@@ -113,7 +121,49 @@ export class InternalServiceProxyController {
     return this.forward(request, response, 'cart');
   }
 
-  private forward(request: Request, response: Response, service: InternalService) {
-    return this.proxy.forward(request, response, service);
+  @Post('checkout')
+  @ApiTags('Checkout')
+  @ApiOperation({ summary: 'Checkout through the Orders Service' })
+  @ApiBearerAuth()
+  @ApiHeader({ name: 'Idempotency-Key', required: true, description: 'Stable checkout retry key' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['expectedPrices'],
+      properties: {
+        expectedPrices: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            required: ['variantId', 'price_decimal', 'currency'],
+            properties: {
+              variantId: { type: 'string', format: 'uuid' },
+              price_decimal: { type: 'string' },
+              currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Checkout published as a pending order' })
+  @ApiResponse({ status: 200, description: 'Current state of an idempotent replay' })
+  @ApiResponse({ status: 202, description: 'Checkout recovery is in progress' })
+  @ApiResponse({ status: 400, description: 'Invalid checkout request' })
+  @ApiResponse({ status: 401, description: 'Access token is missing or invalid' })
+  @ApiResponse({ status: 409, description: 'Checkout, price, stock, or reservation conflict' })
+  @ApiResponse({ status: 422, description: 'Cart or variant cannot be checked out' })
+  @ApiResponse({ status: 503, description: 'Orders or an internal dependency is unavailable' })
+  checkout(
+    @Body() body: CheckoutRequest,
+    @Req() request: Request,
+    @Res() response: Response,
+  ) {
+    return this.forward(request, response, 'orders', body);
+  }
+
+  private forward(request: Request, response: Response, service: InternalService, body?: unknown) {
+    return this.proxy.forward(request, response, service, body);
   }
 }
