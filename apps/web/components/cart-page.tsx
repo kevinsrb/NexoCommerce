@@ -35,7 +35,21 @@ function CartLine({ item }: { item: CartItem }) {
 }
 
 export function CartPage() {
-  const { cart, loading, pending, clear } = useCart();
+  const {
+    cart,
+    loading,
+    pending,
+    clear,
+    checkout,
+    confirmCheckoutPrices,
+    checkoutResult,
+    checkoutError,
+    hasPriceReconfirmation,
+  } = useCart();
+  const checkoutReady = Boolean(
+    cart?.items.length &&
+      cart.items.every((item) => item.available && typeof item.price === 'string' && typeof item.currency === 'string'),
+  );
   return <main className="mx-auto max-w-4xl px-5 py-12 sm:px-8">
     <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
       <h1 className="text-3xl font-semibold tracking-tight">Your cart</h1>
@@ -52,8 +66,21 @@ export function CartPage() {
         </ul>
         <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-white/10 pt-6">
           <button className="cart-button" type="button" disabled={pending} onClick={() => void clear()}>Clear cart</button>
-          <p className="text-xl font-semibold" aria-label="Cart total">Total: {cart.currency} {cart.total}</p>
+          <div className="flex flex-wrap items-center gap-4">
+            <p className="text-xl font-semibold" aria-label="Cart total">Total: {cart.currency} {cart.total}</p>
+            <button className="cart-button" type="button" disabled={pending || !checkoutReady} onClick={() => void checkout()}>Checkout</button>
+          </div>
         </div>
+        {checkoutError && <section role="alert" className="mt-4 rounded-xl border border-amber-300/30 bg-amber-300/5 p-4 text-amber-100">
+          <p>{checkoutError}</p>
+          {hasPriceReconfirmation && <button className="cart-button mt-3" type="button" disabled={pending} onClick={() => void confirmCheckoutPrices()}>Confirm updated prices</button>}
+        </section>}
+        {checkoutResult?.state === 'PENDING' && <section role="status" className="mt-4 rounded-xl border border-emerald-300/30 bg-emerald-300/5 p-4 text-emerald-100">
+          Order {checkoutResult.orderId} is pending until {checkoutResult.expiresAt}.
+        </section>}
+        {checkoutResult?.state === 'EXPIRED' && <section role="alert" className="mt-4 rounded-xl border border-amber-300/30 bg-amber-300/5 p-4 text-amber-100">
+          This checkout expired. Return to your cart to start a new checkout.
+        </section>}
         {pending && <p role="status" className="mt-4 text-sm text-slate-400">Updating your cart…</p>}
       </section>
     )}

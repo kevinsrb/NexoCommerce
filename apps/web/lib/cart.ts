@@ -17,6 +17,24 @@ export type CartItem = {
 
 export type Cart = { currency: string | null; items: CartItem[]; total: string; itemCount: number };
 
+export type CheckoutPriceExpectation = {
+  variantId: string;
+  price_decimal: string;
+  currency: string;
+};
+
+export const checkoutPrices = (cart: Cart): CheckoutPriceExpectation[] | null => {
+  if (!cart.items.length) return null;
+  const prices = cart.items.map((item) =>
+    item.available && typeof item.price === 'string' && typeof item.currency === 'string'
+      ? { variantId: item.variantId, price_decimal: item.price, currency: item.currency }
+      : null,
+  );
+  return prices.every((price) => price !== null)
+    ? prices as CheckoutPriceExpectation[]
+    : null;
+};
+
 export class CartClientError extends Error {
   constructor(
     readonly statusCode: number,

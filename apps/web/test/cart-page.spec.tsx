@@ -74,6 +74,88 @@ describe('Storefront cart flow', () => {
     expect(screen.getByRole('button', { name: /clear cart/i })).toBeEnabled();
   });
 
+  it('submits displayed prices once and renders a pending order with its expiry', async () => {
+    let resolveCheckout!: (response: Response) => void;
+    const transport = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/cart')) return Promise.resolve(jsonResponse(filledCart));
+      expect(url).toBe('https://gateway.example.test/api/checkout');
+      const headers = new Headers(init?.headers);
+      expect(headers.get('Authorization')).toBe('Bearer browser-token');
+      expect(headers.get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(JSON.parse(init?.body as string)).toEqual({
+        expectedPrices: [{ variantId, price_decimal: '128.00', currency: 'USD' }],
+      });
+      return new Promise<Response>((done) => { resolveCheckout = done; });
+    });
+    global.fetch = transport as typeof fetch;
+    renderCart();
+
+    fireEvent.click(await screen.findByRole('button', { name: /checkout/i }));
+    expect(screen.getByRole('button', { name: /checkout/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /checkout/i }));
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2));
+
+    await act(async () => resolveCheckout(jsonResponse({
+      orderId: '500c6fcc-154a-4ec3-8a07-5e02b3f04bf4',
+      state: 'PENDING',
+      currency: 'USD',
+      total_decimal: '128.00',
+      expiresAt: '2026-10-15T12:15:00.000Z',
+      publicationRevision: 1,
+      lines: [],
+    }, 201)));
+    expect(await screen.findByRole('status')).toHaveTextContent(/pending.*2026/i);
+  });
+
+  it('refreshes and requires confirmation after canonical checkout prices change', async () => {
+    const repricedCart = {
+      ...filledCart,
+      total: '130.00',
+      items: [{ ...filledCart.items[0], price: '130.00', subtotal: '130.00' }],
+    };
+    const transport = jest.fn(gatewayFetch([
+      { path: '/cart', response: jsonResponse(filledCart) },
+      {
+        path: '/checkout',
+        method: 'POST',
+        body: { expectedPrices: [{ variantId, price_decimal: '128.00', currency: 'USD' }] },
+        response: jsonResponse({
+          code: 'CHECKOUT_PRICE_CHANGED',
+          message: 'Price changed',
+          request_id: 'checkout-price-change',
+          details: { currentPrices: [{ variantId, price_decimal: '130.00', currency: 'USD' }] },
+        }, 409),
+      },
+      { path: '/cart', response: jsonResponse(repricedCart) },
+      {
+        path: '/checkout',
+        method: 'POST',
+        body: { expectedPrices: [{ variantId, price_decimal: '130.00', currency: 'USD' }] },
+        response: jsonResponse({
+          orderId: '500c6fcc-154a-4ec3-8a07-5e02b3f04bf4',
+          state: 'PENDING',
+          currency: 'USD',
+          total_decimal: '130.00',
+          expiresAt: '2026-10-15T12:15:00.000Z',
+          publicationRevision: 1,
+          lines: [],
+        }, 201),
+      },
+    ]));
+    global.fetch = transport;
+    renderCart();
+
+    fireEvent.click(await screen.findByRole('button', { name: /checkout/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/prices changed/i);
+    expect(screen.getByRole('button', { name: /confirm updated prices/i })).toBeEnabled();
+    expect(screen.getByLabelText('Cart total')).toHaveTextContent('USD 130.00');
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm updated prices/i }));
+    expect(await screen.findByText(/order .* is pending until/i)).toBeInTheDocument();
+    expect(transport).toHaveBeenCalledTimes(4);
+  });
+
   it.each(['remove', 'clear'])('refreshes the cart after the %s 204 response', async (action) => {
     global.fetch = gatewayFetch([
       { path: '/cart', response: jsonResponse(filledCart) },

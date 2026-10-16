@@ -1,7 +1,18 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { addCartItem, CartClientError, clearCart, loadCart, removeCartItem, updateCartItem, type Cart } from '../lib/cart';
+import {
+  addCartItem,
+  CartClientError,
+  checkoutPrices,
+  clearCart,
+  loadCart,
+  removeCartItem,
+  updateCartItem,
+  type Cart,
+  type CheckoutPriceExpectation,
+} from '../lib/cart';
+import { checkout as submitCheckout, CheckoutClientError, type CheckoutResponse } from '../lib/checkout';
 
 type CartContextValue = {
   cart: Cart | null;
@@ -14,6 +25,11 @@ type CartContextValue = {
   update: (variantId: string, quantity: number) => Promise<void>;
   remove: (variantId: string) => Promise<void>;
   clear: () => Promise<void>;
+  checkout: () => Promise<void>;
+  confirmCheckoutPrices: () => Promise<void>;
+  checkoutResult: CheckoutResponse | null;
+  checkoutError: string | null;
+  hasPriceReconfirmation: boolean;
 };
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -24,6 +40,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [checkoutResult, setCheckoutResult] = useState<CheckoutResponse | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [reconfirmationPrices, setReconfirmationPrices] = useState<CheckoutPriceExpectation[] | null>(null);
   const busy = useRef(false);
 
   const run = useCallback(async (operation: () => Promise<Cart | void>) => {
@@ -32,6 +51,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setPending(true);
     setError(null);
     setErrorCode(null);
+    setCheckoutResult(null);
+    setCheckoutError(null);
+    setReconfirmationPrices(null);
     try {
       const result = await operation();
       setCart(result ?? await loadCart());
@@ -47,6 +69,51 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void run(loadCart); }, [run]);
 
+  const submit = useCallback(async (expectedPrices: CheckoutPriceExpectation[]) => {
+    if (busy.current) return;
+    busy.current = true;
+    setPending(true);
+    setCheckoutError(null);
+    try {
+      setCheckoutResult(await submitCheckout(expectedPrices));
+      setReconfirmationPrices(null);
+    } catch (failure) {
+      if (
+        failure instanceof CheckoutClientError &&
+        failure.code === 'CHECKOUT_PRICE_CHANGED' &&
+        failure.currentPrices?.length
+      ) {
+        setReconfirmationPrices(failure.currentPrices);
+        setCheckoutError('Prices changed. Review the updated cart, then confirm checkout.');
+        try {
+          setCart(await loadCart());
+        } catch {
+          setCheckoutError('Prices changed. Refresh your cart, then confirm checkout.');
+        }
+      } else if (failure instanceof CheckoutClientError && failure.code === 'CHECKOUT_PROCESSING') {
+        setCheckoutError('Checkout is processing. Retry shortly to see its current state.');
+      } else {
+        setCheckoutError(failure instanceof Error ? failure.message : 'Checkout could not be completed.');
+      }
+    } finally {
+      busy.current = false;
+      setPending(false);
+    }
+  }, []);
+
+  const checkout = useCallback(async () => {
+    const prices = cart && checkoutPrices(cart);
+    if (!prices) {
+      setCheckoutError('Every cart item must be available with a current price before checkout.');
+      return;
+    }
+    await submit(prices);
+  }, [cart, submit]);
+
+  const confirmCheckoutPrices = useCallback(async () => {
+    if (reconfirmationPrices) await submit(reconfirmationPrices);
+  }, [reconfirmationPrices, submit]);
+
   return <CartContext.Provider value={{
     cart, loading, pending, error, errorCode,
     retry: () => run(loadCart),
@@ -54,6 +121,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
     update: (variantId, quantity) => run(() => updateCartItem(variantId, quantity)),
     remove: (variantId) => run(() => removeCartItem(variantId)),
     clear: () => run(clearCart),
+    checkout,
+    confirmCheckoutPrices,
+    checkoutResult,
+    checkoutError,
+    hasPriceReconfirmation: reconfirmationPrices !== null,
   }}>{children}</CartContext.Provider>;
 }
 
