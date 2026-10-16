@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Patch, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Patch, Post, Req, Res, ServiceUnavailableException } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -10,11 +10,15 @@ import {
 import { type CheckoutRequest } from '@nexo/contracts';
 import { type Request, type Response } from 'express';
 
+import { GATEWAY_ENVIRONMENT, type GatewayEnvironment } from '../environment';
 import { InternalServiceProxy, type InternalService } from './internal-service-proxy.service';
 
 @Controller()
 export class InternalServiceProxyController {
-  constructor(private readonly proxy: InternalServiceProxy) {}
+  constructor(
+    private readonly proxy: InternalServiceProxy,
+    @Inject(GATEWAY_ENVIRONMENT) private readonly environment: GatewayEnvironment,
+  ) {}
 
   @Post('auth/register')
   @ApiTags('Auth')
@@ -160,6 +164,8 @@ export class InternalServiceProxyController {
     @Req() request: Request,
     @Res() response: Response,
   ) {
+    if (!this.environment.CHECKOUT_ENABLED)
+      throw new ServiceUnavailableException('Checkout temporarily unavailable');
     return this.forward(request, response, 'orders', body);
   }
 

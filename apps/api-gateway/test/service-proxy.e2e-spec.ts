@@ -66,6 +66,7 @@ describe('API Gateway service proxy', () => {
   const originalCatalogServiceUrl = process.env.CATALOG_SERVICE_URL;
   const originalCartServiceUrl = process.env.CART_SERVICE_URL;
   const originalOrdersServiceUrl = process.env.ORDERS_SERVICE_URL;
+  const originalCheckoutEnabled = process.env.CHECKOUT_ENABLED;
 
   beforeAll(async () => {
     authRequests = [];
@@ -181,6 +182,7 @@ describe('API Gateway service proxy', () => {
     process.env.CATALOG_SERVICE_URL = await listen(catalogServer);
     process.env.CART_SERVICE_URL = await listen(cartServer);
     process.env.ORDERS_SERVICE_URL = await listen(ordersServer);
+    process.env.CHECKOUT_ENABLED = 'true';
 
     const moduleFixture = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleFixture.createNestApplication<NestExpressApplication>();
@@ -203,6 +205,8 @@ describe('API Gateway service proxy', () => {
     else process.env.CART_SERVICE_URL = originalCartServiceUrl;
     if (originalOrdersServiceUrl === undefined) delete process.env.ORDERS_SERVICE_URL;
     else process.env.ORDERS_SERVICE_URL = originalOrdersServiceUrl;
+    if (originalCheckoutEnabled === undefined) delete process.env.CHECKOUT_ENABLED;
+    else process.env.CHECKOUT_ENABLED = originalCheckoutEnabled;
   });
 
   it('forwards Auth requests and preserves the inbound request ID', async () => {
@@ -275,6 +279,28 @@ describe('API Gateway service proxy', () => {
         body: JSON.stringify(body),
       }),
     );
+  });
+
+  it('does not forward a new checkout while the rollout switch is disabled', async () => {
+    process.env.CHECKOUT_ENABLED = 'false';
+    const fixture = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const disabled = fixture.createNestApplication<NestExpressApplication>();
+    configureHttpApp(disabled);
+    await disabled.init();
+    const receivedBefore = ordersRequests.length;
+    try {
+      const response = await request(disabled.getHttpServer())
+        .post('/api/checkout')
+        .set('authorization', 'Bearer customer')
+        .set('idempotency-key', 'checkout-disabled')
+        .send({ expectedPrices: [] })
+        .expect(503);
+      expect(response.body).toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+      expect(ordersRequests).toHaveLength(receivedBefore);
+    } finally {
+      await disabled.close();
+      process.env.CHECKOUT_ENABLED = 'true';
+    }
   });
 
   it('returns a safe 503 when Orders times out or is unavailable', async () => {

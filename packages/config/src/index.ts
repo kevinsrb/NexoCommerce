@@ -41,6 +41,7 @@ export const gatewayEnvironmentSchema = baseEnvironmentSchema.extend({
   CATALOG_SERVICE_URL: internalServiceOrigin,
   CART_SERVICE_URL: internalServiceOrigin,
   ORDERS_SERVICE_URL: internalServiceOrigin,
+  CHECKOUT_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default('false'),
 });
 
 export const cartEnvironmentSchema = baseEnvironmentSchema.extend({
